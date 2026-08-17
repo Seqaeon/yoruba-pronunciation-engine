@@ -134,17 +134,13 @@ micromamba create -y -p .mfa-env -c conda-forge \
     python=3.11 montreal-forced-aligner "kaldi=*=cpu*"
 pip install -e . -r requirements.txt
 
-# 2. Fetch the trained artifacts (64 MB, verified against models/MANIFEST.json)
+# 2. Fetch every trained artifact (1.33 GB, checksummed against MANIFEST.json)
 python scripts/fetch_models.py
 
-# 3. Fetch the speech model used for vowel identity (1.26 GB)
-mkdir -p models/lyngual-yoruba && wget -c -O models/lyngual-yoruba/model.safetensors \
-    https://huggingface.co/LyngualLabs/mms-300m-yoruba-english/resolve/main/model.safetensors
-
-# 4. Check everything resolved
+# 3. Check everything resolved
 python -m yoruba_engine.cli health
 
-# 5. Assess a recording
+# 4. Assess a recording
 python -m yoruba_engine.cli assess \
     --reference data/corpus/wavs/yof_00295_00099759266.wav \
     --learner uploads/learner.wav \
@@ -182,15 +178,28 @@ pip install -e . -r requirements.txt
 
 Plain pip. `praat-parselmouth`, `scikit-learn`, `soundfile`, `numpy`, `joblib`.
 
-### 3. The speech model for vowel identity
+### 3. Trained artifacts, including the speech model
 
 ```bash
-mkdir -p models/lyngual-yoruba
-wget -c -O models/lyngual-yoruba/model.safetensors \
-  https://huggingface.co/LyngualLabs/mms-300m-yoruba-english/resolve/main/model.safetensors
+python scripts/fetch_models.py          # download and verify everything
+python scripts/fetch_models.py --check  # verify only
 ```
 
-1.26 GB, `Wav2Vec2ForCTC`, 300M parameters. Its 97-token vocabulary carries every
+**1.33 GB across four files**, all attached to the GitHub Release and checksummed
+in `models/MANIFEST.json`:
+
+| artifact | size |
+|---|---|
+| `models/lyngual-yoruba/model.safetensors` | 1,262 MB |
+| `models/yoruba_acoustic.zip` | 62 MB |
+| `models/vowel_classifier.joblib` | 5.5 MB |
+| `models/tone_classifier.joblib` | 1.8 MB |
+
+If the repository is private, run `gh auth login` first — private release assets
+return 404 over anonymous HTTP, so the fetcher uses `gh` and falls back to a
+plain URL only for public repositories.
+
+The speech model is `Wav2Vec2ForCTC`, 300M parameters. Its 97-token vocabulary carries every
 distinction the engine reasons about — `ẹ ọ ṣ`, all eight tone-marked vowels, and
 the syllabic nasals `ń ǹ`. A romanized model would have folded those away before
 the audio was ever seen.
@@ -207,18 +216,6 @@ metadata, never guessed.
 The Apache-2.0 tag on that repository sits on weights derived from
 `facebook/mms-300m`, which Meta licenses CC-BY-NC-4.0. That tag is the uploader's
 assertion, not an audit — verify before shipping commercially.
-
-### 4. Trained artifacts
-
-```bash
-python scripts/fetch_models.py          # download and verify
-python scripts/fetch_models.py --check  # verify only
-```
-
-64 MB of model files are too large for git and live on a GitHub Release.
-`models/MANIFEST.json` carries their sha256 sums. If the repository is private,
-run `gh auth login` first — the fetcher uses `gh` because private release assets
-return 404 over anonymous HTTP.
 
 **Why the dictionary is committed but the models are not:** MFA does not report a
 phone-set mismatch. Align a dictionary whose phones differ from the model's and
@@ -292,9 +289,22 @@ python scripts/demo_assess.py \
 
 ### Audio format
 
-**Any rate, any channel count.** Recordings are downmixed to mono and resampled
-to 16 kHz on the way into the aligner, so a phone recording at 48 kHz stereo
-scores the same as a hand-converted file.
+**Record at 16 kHz mono if you can.** Anything else works — recordings are
+downmixed and resampled on the way into the aligner, so a 48 kHz stereo phone
+recording now scores identically to a hand-converted file — but 16 kHz mono is
+what the whole engine was trained and calibrated on, so it is the one format
+that involves no conversion at all:
+
+```
+16 kHz, mono, 16-bit PCM WAV
+```
+
+Resampling is not free of consequence even when it is correct. It is
+interpolation, so it cannot recover detail the original lacks, and every
+conversion is one more step between what the learner said and what the model
+scores. Recording at the target rate removes that step. It also removes MFA's
+per-pass resampling cost, which is what made one local training run 6x slower
+per hour of audio than an equivalent Kaggle one.
 
 That was not always true, and the bug is worth knowing about because it failed
 quietly. The training corpus and every asset calibrated against it -- the

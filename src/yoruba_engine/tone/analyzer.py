@@ -279,18 +279,44 @@ class ToneAnalyzer:
             ref_word = reference[ref_index]
             learner_word = learner[learner_index]
 
+            # What the word's tones SHOULD be, from its spelling.
+            #
+            # This used to compare the learner's detected tones against the
+            # *reference recording's* detected tones, which put both sides
+            # through the same fallible detector. Two consequences, both bad:
+            # a detector error on the reference became a false target, and a
+            # vowel the detector could not read on the reference silently
+            # excused the learner. Observed on àbùbùtán, whose spelling is
+            # unambiguously Low-Low-Low-High: the reference read as
+            # Low-Mid-Unknown-Unknown, so a learner saying it with the wrong
+            # final tone could never be told.
+            #
+            # Yoruba orthography encodes tone directly, and the prompt is
+            # diacritized, so the target is free and certain. The reference
+            # recording is still needed -- for speaker-relative pitch
+            # normalization and for confirming the learner said the prompt at
+            # all -- but it is the wrong source for the target itself.
+            written = expected_pattern_from_text(ref_word.word)
+            usable = len(written) == len(ref_word.vowels) and all(
+                tone is not Tone.UNKNOWN for tone in written)
+
             for vowel_index, (ref_vowel, learner_vowel) in enumerate(
                 zip(ref_word.vowels, learner_word.vowels)
             ):
+                # Fall back to the reference's detection only where the prompt
+                # carries no usable marks, which happens with an undiacritized
+                # corpus.
+                expected = written[vowel_index] if usable else ref_vowel.detected_tone
+
                 # An unmeasurable vowel is not evidence of an error.
                 if (
-                    ref_vowel.detected_tone is Tone.UNKNOWN
+                    expected is Tone.UNKNOWN
                     or learner_vowel.detected_tone is Tone.UNKNOWN
                 ):
                     continue
 
                 total += 1
-                if ref_vowel.detected_tone == learner_vowel.detected_tone:
+                if expected == learner_vowel.detected_tone:
                     matched += 1
                 elif learner_vowel.confidence >= self.config.min_confidence:
                     errors.append(
@@ -298,7 +324,7 @@ class ToneAnalyzer:
                             word=ref_word.word,
                             word_index=ref_index,
                             vowel_index=vowel_index,
-                            expected=ref_vowel.detected_tone,
+                            expected=expected,
                             detected=learner_vowel.detected_tone,
                         )
                     )

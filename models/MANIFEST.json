@@ -17,6 +17,11 @@
       "bytes": 1835808,
       "sha256": "75142e046836ac3bb2574899afa5b49d1b77d033e8d95616d8e75ae7dc003128",
       "purpose": "Tone classifier, trained on this aligner's boundaries."
+    },
+    "models/lyngual-yoruba/model.safetensors": {
+      "bytes": 1262205180,
+      "sha256": "766a4e6c9c98fbb59bb4a2850c0ab0677a1197969564f28aab9b50815368aeb3",
+      "purpose": "wav2vec2 checkpoint the vowel classifier reads its features from (LyngualLabs/mms-300m-yoruba-english, layer 16). Without it the engine disables vowel-identity checking."
     }
   },
   "acoustic_model_sha256": "29b8a87b1aee99eb958220eca61367edfb92beb5f959b3d10095a37c9aa93e27",

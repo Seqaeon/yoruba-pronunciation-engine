@@ -215,6 +215,34 @@ class AssessmentPipeline:
             dropped = self._drop_unspoken_words(learner)
             mispronounced = self._check_vowel_identity(learner)
 
+            # A word that was not produced cannot have been said differently.
+            #
+            # Decoding runs first on purpose: a substituted word IS present in
+            # the audio, so dropping before decoding would report it as an
+            # omission. But the same ordering lets the decoder name a word in a
+            # slot where nothing was spoken -- forced alignment still assigns
+            # that slot some sliver of audio, and the decoder dutifully scores
+            # it. Observed after the margin was lowered to 2.0: a recording that
+            # omitted 'bíi' entirely was told "you said 'bòó'", which is a
+            # confident claim about silence.
+            #
+            # The duration check is the authority on presence, so its verdict
+            # overrides the decoder's here.
+            #
+            # Match on the decoded *value*, not the prompt word: _decode_words
+            # has already renamed the word in place, so the duration check sees
+            # and reports the decoded name. A first attempt at this matched on
+            # the key and silently did nothing.
+            absent = {normalize(word) for word in dropped} | set(dropped)
+            for prompted, decoded in list(substitutions.items()):
+                if decoded in absent or normalize(decoded) in absent:
+                    substitutions.pop(prompted)
+                    dropped = [w for w in dropped if w not in (decoded, prompted)]
+                    dropped.append(prompted)
+                    logger.info("%s: withdrew decoded substitution %r -> %r; the "
+                                "duration check says nothing was produced there",
+                                learner.utterance_id, prompted, decoded)
+
         result = self.comparison_engine.compare(reference, learner)
         result.utterance_id = utt_id
         result.undetected_words = dropped

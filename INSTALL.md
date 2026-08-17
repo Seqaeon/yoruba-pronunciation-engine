@@ -136,29 +136,33 @@ Parselmouth is strongly recommended. Without it the engine falls back to a
 pure-Python pitch tracker that is accurate enough for tests but not for
 production.
 
-## 3b. Speech model for vowel identity
+## 3b. Trained artifacts
 
 ```bash
-mkdir -p models/lyngual-yoruba
-wget -c -O models/lyngual-yoruba/model.safetensors \
-  https://huggingface.co/LyngualLabs/mms-300m-yoruba-english/resolve/main/model.safetensors
-
-python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" \
-  models/lyngual-yoruba/model.safetensors
-# expect 766a4e6c9c98fbb59bb4a2850c0ab0677a1197969564f28aab9b50815368aeb3
+python scripts/fetch_models.py
 ```
 
-1.26 GB. The config files it needs (`config.json`, `vocab.json`, and four more,
-about 5 KB total) are already committed under `models/lyngual-yoruba/`.
+Fetches all four artifacts (1.33 GB) from the GitHub Release and verifies each
+against the sha256 in `models/MANIFEST.json`. The largest is the 1,262 MB
+wav2vec2 checkpoint the vowel classifier reads its features from; its small
+config files (`config.json`, `vocab.json` and four others, about 5 KB) are
+committed, since the weights are useless without the vocabulary.
 
-Use `wget -c`, not the `huggingface_hub` downloader, if you need to resume an
-interrupted transfer. HuggingFace **preallocates the blob to its full final
-size**, so a partial download looks complete to anything reading the file
-length -- `ls`, `stat`, and `curl -C -` all resume from the wrong offset and
-produce a corrupt file that passes a size check and fails its hash. `du -k`
-(allocated blocks) is the only honest progress measure on a partial HF blob.
+If the repository is private, authenticate first -- private release assets return
+404 over anonymous HTTP:
 
-This step is optional. Without it the engine logs a warning and disables
+```bash
+gh auth login
+```
+
+Should you ever fetch the checkpoint from HuggingFace by hand instead, use
+`wget -c` and not the `huggingface_hub` downloader. HuggingFace **preallocates
+the blob to its full final size**, so a partial download looks complete to
+anything reading the file length -- `ls`, `stat` and `curl -C -` all resume from
+the wrong offset and produce a corrupt file that passes a size check and fails
+its hash. `du -k` (allocated blocks) is the only honest progress measure there.
+
+The speech model is optional. Without it the engine logs a warning and disables
 vowel-identity checking; alignment, omission detection, tone comparison and GOP
 all still work. Which feature backend is used is read from the classifier's own
 metadata, so a mismatch cannot happen silently.
