@@ -35,5 +35,6 @@
     "cepstral_normalization": "none",
     "audio_sample_rate": 16000,
     "uses_bandwidths": true
-  }
+  },
+  "repository": "Seqaeon/yoruba-pronunciation-engine"
 }

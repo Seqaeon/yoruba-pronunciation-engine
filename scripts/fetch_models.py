@@ -32,7 +32,7 @@ MANIFEST = PROJECT_ROOT / "models" / "MANIFEST.json"
 #: Where release assets live. Override with --base-url for a mirror or a
 #: local file:// path when the machine has no internet access.
 DEFAULT_BASE = "https://github.com/{repo}/releases/download/{tag}/"
-DEFAULT_REPO = "OWNER/yoruba-pronunciation-engine"
+DEFAULT_REPO = "Seqaeon/yoruba-pronunciation-engine"
 
 
 def digest(path: Path) -> str:
