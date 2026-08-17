@@ -260,7 +260,15 @@ class AssessmentPipeline:
                     derived.append("[?]")
                 elif bare in substitutions:
                     derived.append(substitutions[bare])
-                elif bare in {normalize(w) for w in mispronounced}:
+                elif bare in {normalize(w) for w in mispronounced} or \
+                        bare in {normalize(w) for w in poorly}:
+                    # GOP earns a marker of its own. At 30 ms a vowel
+                    # measurement cannot distinguish "said u" from "said an in a
+                    # span the aligner mangled" -- both read as u with high
+                    # confidence -- so the vowel check is silent on both. GOP
+                    # scores the whole word against the acoustic model and
+                    # separates them: -4.8 for the genuinely wrong word, nothing
+                    # for the one whose only error was tonal.
                     derived.append(f"{token}?")
                 else:
                     derived.append(token)

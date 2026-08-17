@@ -122,6 +122,12 @@ class ReportGenerator:
                 "",
             ])
 
+        # Which words the acoustic model fitted badly. Needed before the word
+        # alignment table, because a word GOP scores at -4.8 must not print as
+        # "ok" -- that is the case the vowel check cannot see.
+        unspoken = {w for w in result.undetected_words}
+        flagged_by_gop = [w for w in result.poorly_pronounced if w not in unspoken]
+
         lines.extend([
             "SCORES",
             "-" * 62,
@@ -148,7 +154,7 @@ class ReportGenerator:
             elif ref_word in result.substitutions:
                 shown = result.substitutions[ref_word]
                 status = "SAID DIFFERENTLY"
-            elif ref_word in result.mispronounced_words:
+            elif ref_word in result.mispronounced_words or ref_word in flagged_by_gop:
                 # Showing the prompt word here would claim the learner produced
                 # it, next to a warning saying they may not have. We know a word
                 # was spoken in that slot but not which one.
@@ -190,8 +196,6 @@ class ReportGenerator:
         #
         # The score stays in the JSON payload for tuning and is folded into the
         # words-to-check list, which is phrased for a learner.
-        unspoken = {w for w in result.undetected_words}
-        flagged_by_gop = [w for w in result.poorly_pronounced if w not in unspoken]
 
         if result.substitutions:
             lines.extend([
