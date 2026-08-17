@@ -1,0 +1,55 @@
+{
+  "created": "2026-08-15T20:45:55.461663+00:00",
+  "trained_on": "kaggle",
+  "sources": {
+    "openslr": {
+      "utterances": 3083,
+      "hours": 3.467
+    },
+    "michsethowusu": {
+      "utterances": 99550,
+      "hours": 24.0
+    },
+    "waxal": {
+      "utterances": 2202,
+      "hours": 6.302
+    },
+    "local_tts": {
+      "utterances": 1606,
+      "hours": 4.16
+    }
+  },
+  "total_hours": 37.93,
+  "speakers": 2047,
+  "dictionary": {
+    "entries": 8963,
+    "phones": 31,
+    "tone_in_phones": false
+  },
+  "filters": {
+    "min_duration_s": 0.3,
+    "max_duration_s": 15.0,
+    "require_tone_marks": false
+  },
+  "alignment": {
+    "attempted": 105328,
+    "textgrids": 104961,
+    "failure_rate": 0.0035
+  },
+  "holdout_evaluation": {
+    "utterances": 500,
+    "aligned": 500,
+    "alignment_success": 1.0,
+    "mean_vowel_ms": 97.3,
+    "distinct_phones": 30,
+    "tone_accuracy": 0.6315
+  },
+  "holdout_speakers": [
+    "openslr_yof_00295",
+    "openslr_yof_07508",
+    "openslr_yom_00295",
+    "openslr_yom_01208",
+    "openslr_yom_01523"
+  ],
+  "holdout_applied": true
+}

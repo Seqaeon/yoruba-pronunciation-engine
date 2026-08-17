@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "release_tag": "v0.1.0",
+  "note": "Artifacts too large for git. Fetch with scripts/fetch_models.py. The calibration files committed in models/ (gop_reference.json, word_duration_stats.json) are measurements of THIS acoustic model's behaviour and are wrong for any other -- see acoustic_model_sha256.",
+  "artifacts": {
+    "models/yoruba_acoustic.zip": {
+      "bytes": 61607567,
+      "sha256": "29b8a87b1aee99eb958220eca61367edfb92beb5f959b3d10095a37c9aa93e27",
+      "purpose": "MFA acoustic model. Everything else is calibrated against it."
+    },
+    "models/vowel_classifier.joblib": {
+      "bytes": 2945007,
+      "sha256": "d36badabbe5c3a3159b0757a7ef7ee5f55183ad6a06e59706d8a01dfa331a2e7",
+      "purpose": "Vowel identity classifier (39 features, bandwidths included)."
+    },
+    "models/tone_classifier.joblib": {
+      "bytes": 1835808,
+      "sha256": "75142e046836ac3bb2574899afa5b49d1b77d033e8d95616d8e75ae7dc003128",
+      "purpose": "Tone classifier, trained on this aligner's boundaries."
+    }
+  },
+  "acoustic_model_sha256": "29b8a87b1aee99eb958220eca61367edfb92beb5f959b3d10095a37c9aa93e27",
+  "calibrated_against": {
+    "dictionary_sha256": "29bfa5ea824038b61b3795767cecbb2697979a25ad5e7b1850ae2009f53ce6f9",
+    "committed_calibration": [
+      "models/gop_reference.json",
+      "models/word_duration_stats.json",
+      "models/word_frequency.json"
+    ]
+  },
+  "vowel_classifier": {
+    "training_vowels": 131360,
+    "holdout_accuracy": 0.5953,
+    "macro_f1": 0.4323,
+    "cepstral_normalization": "none",
+    "audio_sample_rate": 16000,
+    "uses_bandwidths": true
+  }
+}

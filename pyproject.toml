@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yoruba-engine"
+version = "0.1.0"
+description = "Yoruba speech and tone comparison engine for pronunciation assessment"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+
+# The core pipeline deliberately has few hard dependencies. MFA itself is
+# installed separately via conda, because its Kaldi binaries are not pip-installable.
+dependencies = [
+    "numpy>=1.24",
+    "soundfile>=0.12",
+    "praat-parselmouth>=0.4.3",
+]
+
+[project.optional-dependencies]
+# Notebook + training extras, needed only to run notebooks/train_mfa_yoruba.ipynb
+train = [
+    "jupyter>=1.0",
+    "matplotlib>=3.7",
+    "pandas>=2.0",
+    "librosa>=0.10",
+    "tqdm>=4.65",
+]
+# Future FastAPI service layer
+api = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.6",
+]
+# Trained tone classifier (optional; the threshold rules need none of this)
+tone-classifier = [
+    "scikit-learn>=1.3",
+    "joblib>=1.3",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "mypy>=1.8",
+    "ruff>=0.3",
+]
+
+[project.scripts]
+yoruba-engine = "yoruba_engine.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

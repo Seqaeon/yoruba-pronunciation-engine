@@ -1,0 +1,49 @@
+# Manual pronunciation overrides.
+#
+# Entries here always win over the rule-based G2P. Use this file for:
+#   - loanwords with non-Yoruba letters (c, q, v, x, z)
+#   - proper nouns with irregular pronunciation
+#   - words where the automatic G2P is simply wrong
+#   - pronunciation variants (repeat the word on a second line)
+#
+# Format:  word <TAB> space-separated phones
+#
+# Phone inventory, as produced by yoruba_engine.g2p.dictionary:
+#   Vowels (tone suffixed _H high, _M mid, _L low):
+#     a e E i o O u          E = ẹ,  O = ọ
+#     an En in On un         nasal vowels, written Vn
+#     n_H n_M n_L            syllabic nasal
+#   Consonants:
+#     b d f g gb h j k l m n p r s S t w y     S = ṣ
+#
+# Regenerate the dictionary after editing:
+#   yoruba-engine dictionary
+#
+# --- Foreign proper nouns in this corpus -------------------------------------
+#
+# These use letters outside the Yoruba alphabet (c, v) or English clusters, so
+# the rules cannot convert them. The pronunciations below are Yoruba-ized: v is
+# realized as f, ch as ṣ, and English codas take an epenthetic vowel.
+#
+# VERIFY THESE. They are a best guess at how a Yoruba speaker reads each name,
+# and a native speaker should confirm them against the actual recordings before
+# training. A wrong pronunciation here corrupts the alignment of that word.
+
+avenue	a_L f e_H n u_L
+bauchi	b a_L u_H S i_L
+caleb	k e_H l e_H b u_L
+califonia	k a_L l i_H f o_H n i_L a_L
+ceter	s e_H t a_L
+chelsea	S e_H l s i_H
+civic	s i_H f i_H k i_L
+jèhóvà	j e_L h o_H f a_L
+manchester	m an_H S e_H s i_H t a_L
+mecca	m e_H k a_L
+
+# Initials, read letter by letter.
+m.k.o	e_H m u_L k e_H y i_L o_H
+
+# --- Examples (delete or extend) ---
+
+# A loanword the rules cannot handle: "computer"
+kọ̀ǹpútà	k O_L n p u_H t a_L

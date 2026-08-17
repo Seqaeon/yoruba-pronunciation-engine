@@ -1,0 +1,28 @@
+# Core runtime dependencies for the Yoruba pronunciation assessment engine.
+#
+# Montreal Forced Aligner is NOT listed here: it ships Kaldi binaries and must be
+# installed via conda. See INSTALL.md.
+#
+#   conda install -c conda-forge montreal-forced-aligner
+
+numpy>=1.24
+soundfile>=0.12
+praat-parselmouth>=0.4.3
+
+# --- Notebook / acoustic model training (pip install -r requirements-train.txt) ---
+# jupyter>=1.0
+# matplotlib>=3.7
+# pandas>=2.0
+# librosa>=0.10
+# tqdm>=4.65
+
+# --- Future FastAPI service layer ---
+# fastapi>=0.110
+# uvicorn[standard]>=0.27
+# python-multipart>=0.0.9
+
+# --- Development ---
+# pytest>=8.0
+# pytest-cov>=4.1
+# mypy>=1.8
+# ruff>=0.3
