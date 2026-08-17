@@ -32,6 +32,21 @@ def _serialize(obj: Any) -> Any:
     raise TypeError(f"Cannot serialize {type(obj).__name__}")
 
 
+def _expected_pattern(word) -> str:
+    """The tones a word should carry, from its spelling.
+
+    Falls back to whatever was detected in the reference recording only when the
+    prompt has no usable marks, which happens with an undiacritized corpus.
+    """
+    from ..g2p.orthography import normalize, tone_pattern  # noqa: PLC0415
+    from ..datatypes import Tone  # noqa: PLC0415
+
+    written = tone_pattern(normalize(word.word))
+    if len(written) == len(word.vowels) and all(t is not Tone.UNKNOWN for t in written):
+        return "-".join(_TONE_NAMES[t] for t in written)
+    return word.pattern_string()
+
+
 def _speech_pairs(
     reference: UtteranceAnalysis,
     learner: UtteranceAnalysis,
@@ -153,21 +168,30 @@ class ReportGenerator:
                     learner_word.pattern_string() if learner_word is not None
                     else "(not detected)"
                 )
-                lines.append(f"{ref_word.word:<20} {ref_word.pattern_string():<20} {detected:<20}")
+                # The target is what the word is SPELLED with, not what the
+                # detector made of the reference recording. Showing the latter
+                # was actively misleading: àbùbùtán is spelled Low-Low-Low-High
+                # and the column read "Low-Mid-?-?", so a learner comparing the
+                # two columns was being shown the detector's own failure as
+                # though it were the goal.
+                expected = _expected_pattern(ref_word)
+                lines.append(f"{ref_word.word:<20} {expected:<20} {detected:<20}")
 
-        if result.poorly_pronounced:
-            lines.extend([
-                "POORLY PRODUCED",
-                "-" * 62,
-                "The acoustic model fitted these words badly. Unlike the vowel",
-                "check this does not need the word to exist, so it catches",
-                "sounds that are not Yoruba words at all.",
-            ])
-            for word, score in sorted(result.poorly_pronounced.items(),
-                                      key=lambda item: item[1]):
-                lines.append(f"  {word}  ({score:+.1f} standard deviations "
-                             "below native production)")
-            lines.append("")
+        # Goodness-of-Pronunciation is a diagnostic signal, not feedback. Two
+        # reasons it is not shown as its own section:
+        #
+        # "The acoustic model fitted these words badly, -3.2 standard deviations
+        # below native production" tells a learner nothing they can act on; it
+        # describes the engine, not their speech.
+        #
+        # And it contradicted the rest of the report. A word the duration check
+        # says was never produced would still appear here as "poorly produced",
+        # which reads as a comment on speech that did not happen.
+        #
+        # The score stays in the JSON payload for tuning and is folded into the
+        # words-to-check list, which is phrased for a learner.
+        unspoken = {w for w in result.undetected_words}
+        flagged_by_gop = [w for w in result.poorly_pronounced if w not in unspoken]
 
         if result.substitutions:
             lines.extend([
@@ -179,13 +203,14 @@ class ReportGenerator:
                 lines.append(f"  you said {said!r} where the prompt was {prompted!r}")
             lines.append("")
 
-        if result.mispronounced_words:
+        to_check = list(dict.fromkeys(list(result.mispronounced_words) + flagged_by_gop))
+        if to_check:
             lines.extend([
                 "", "WORDS TO CHECK", "-" * 62,
-                "The vowels here did not match the prompt closely. This check is",
-                "indicative, not certain: about 3% of correctly spoken words are",
-                "queried by it.",
-                "  " + ", ".join(result.mispronounced_words),
+                "These did not sound like the prompt. The check is indicative,",
+                "not certain -- a small share of correctly spoken words are",
+                "queried by it, so treat them as worth a second try.",
+                "  " + ", ".join(to_check),
             ])
 
         if result.undetected_words:
@@ -274,7 +299,7 @@ class ReportGenerator:
             payload["tone_patterns"] = [
                 {
                     "word": ref_word.word,
-                    "expected": [_TONE_NAMES[t] for t in ref_word.tone_pattern],
+                    "expected": _expected_pattern(ref_word).split("-"),
                     "detected": (
                         [_TONE_NAMES[t] for t in learner_word.tone_pattern]
                         if learner_word is not None else None

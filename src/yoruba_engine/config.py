@@ -25,7 +25,32 @@ class PitchConfig:
 
     floor_hz: float = 75.0
     ceiling_hz: float = 350.0
-    time_step_s: float = 0.01
+    #: Pitch analysis step. 5 ms rather than 10 because a vowel whose tone
+    #: cannot be read is not a neutral outcome -- the comparison skips it, so a
+    #: wrong tone there is never reported and the learner is silently excused.
+    #:
+    #: A learner recording of ``àbùbùtán`` aligned at 190, 30, 30 and 30 ms.
+    #: After a 20% edge trim, a 30 ms vowel leaves 18 ms, which at a 10 ms step
+    #: is one or two frames -- below ``min_voiced_frames`` -- so three quarters
+    #: of the word was unjudgeable. Short vowels are ordinary in fluent speech.
+    #:
+    #: Swept against SLR86, where the diacritized spelling is ground truth:
+    #:
+    #:     step   trim  coverage  accuracy  coverage x accuracy
+    #:     0.010  0.20    80.0%     75.9%        60.7%
+    #:     0.005  0.20    92.9%     70.6%        65.6%   <- here
+    #:     0.005  0.10    93.4%     70.6%        65.9%
+    #:
+    #: Coverage rises 13 points and accuracy falls 5, so more vowels are judged
+    #: and a larger share of the judgements are wrong. That trade is taken
+    #: because 20% of vowels going unjudged is how a wrong tone escapes
+    #: entirely, and because ``ToneConfig.min_confidence`` already withholds
+    #: shaky readings from the learner while still counting them in the score.
+    #:
+    #: ``min_voiced_frames`` was swept too and made no difference at 3 or 2: the
+    #: binding constraint is how many frames the step and trim leave, not the
+    #: threshold applied afterwards.
+    time_step_s: float = 0.005
     #: Ignore the first and last N% of a vowel, where coarticulation with
     #: neighbouring consonants distorts F0.
     edge_trim_ratio: float = 0.20
