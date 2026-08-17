@@ -19,7 +19,14 @@ and therefore contains SLR86, which is already the local corpus. Merging blind
 would double-count utterances and pull the classifier further toward speakers it
 already over-represents.
 
+**Ingestion is incremental.** Transcripts already staged in the output corpus
+are read back as part of the deduplication set, so re-running adds only what is
+new and re-running with no new data is a no-op. This matters because the sources
+overlap heavily: Common Voice 26.0 and IroyinSpeech share 3,062 byte-identical
+clips, IroyinSpeech being a subset of an earlier Common Voice release.
+
     python scripts/ingest_studio.py --out data/studio_corpus
+    python scripts/ingest_studio.py --only commonvoice
 """
 
 from __future__ import annotations
@@ -87,7 +94,8 @@ class Stager:
         self.speakers: dict[str, set] = {}
 
     def add(self, source: str, speaker: str | None, utt_id: str, text: str,
-            data: bytes | None = None, path: Path | None = None) -> bool:
+            data: bytes | None = None, path: Path | None = None,
+            per_speaker: bool = False) -> bool:
         text = (text or "").strip()
         if not text:
             self.rejected["empty"] += 1
@@ -100,6 +108,23 @@ class Stager:
         if not key:
             self.rejected["empty"] += 1
             return False
+        # The transcript is the deduplication key because the sources
+        # redistribute each other's recordings after re-encoding, which changes
+        # every byte and defeats hashing the audio.
+        #
+        # It is the wrong key when a corpus deliberately has several speakers
+        # read the same prompt. Common Voice does, and dropping those cost 332
+        # of 448 genuinely new recordings on the 26.0 ingest -- new voices, new
+        # formants, discarded for saying a sentence we already had. A vowel
+        # classifier learns from acoustics, so a second speaker reading a known
+        # sentence is new evidence, not a duplicate.
+        #
+        # `per_speaker` therefore keys on speaker as well, and is set only for
+        # sources with trustworthy speaker IDs. Sources that anonymise speakers
+        # keep the strict rule, since there a repeated transcript is more likely
+        # to be the same recording arriving by a second route.
+        if per_speaker and speaker:
+            key = f"{speaker}\x00{key}"
         if key in self.seen_text:
             self.rejected["duplicate transcript"] += 1
             return False
@@ -136,6 +161,10 @@ class Stager:
         (directory / f"{utt_id}.lab").write_text(normalize(text), encoding="utf-8")
 
         self.seen_text.add(key)
+        if per_speaker and speaker:
+            # Also record the bare transcript, so a later strict source does not
+            # readmit this utterance under its own weaker rule.
+            self.seen_text.add(key.split("\x00", 1)[1])
         self.kept[source] += 1
         self.hours[source] += duration / 3600
         self.speakers.setdefault(source, set()).add(group)
@@ -152,6 +181,31 @@ def existing_transcripts(config: EngineConfig) -> set[str]:
         for row in csv.reader(handle, delimiter="\t"):
             if len(row) >= 3:
                 seen.add(" ".join(tokenize(normalize(row[2]), keep_noise=False)))
+    return seen
+
+
+def staged_transcripts(root: Path) -> set[str]:
+    """Deduplication keys for everything already staged in the output corpus.
+
+    Emits both forms of key, because the two deduplication rules have to share
+    one set: the bare transcript, which strict sources match on, and the
+    speaker-qualified transcript that ``per_speaker`` sources match on. The
+    speaker is recovered from the group directory name, which is written as
+    ``{source}_{speaker}`` -- so a recording reaching us again through a
+    different corpus is still recognised, as the speaker ID survives the
+    re-export even when the audio has been re-encoded.
+    """
+    seen = set()
+    for lab in root.rglob("*.lab"):
+        try:
+            text = lab.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        key = " ".join(tokenize(normalize(text), keep_noise=False))
+        seen.add(key)
+        group = lab.parent.name
+        if "_" in group:
+            seen.add(f"{group.split('_', 1)[1]}\x00{key}")
     return seen
 
 
@@ -177,8 +231,14 @@ def ingest_parquet(stager: Stager, paths: list[Path], source: str) -> None:
         print(f"  {path.name}: running total {stager.kept[source]:,}", flush=True)
 
 
-def ingest_common_voice(stager: Stager, root: Path, source: str) -> None:
-    """Read a Common Voice export: validated.tsv plus clips/."""
+def ingest_common_voice(stager: Stager, root: Path, source: str,
+                        per_speaker: bool = True) -> None:
+    """Read a Common Voice export: validated.tsv plus clips/.
+
+    ``per_speaker`` defaults on here: Common Voice records a stable
+    ``client_id`` and deliberately collects the same prompt from several
+    speakers, which is acoustic variety rather than duplication.
+    """
     table = root / "validated.tsv"
     if not table.exists():
         print(f"  {table} not found"); return
@@ -190,7 +250,8 @@ def ingest_common_voice(stager: Stager, root: Path, source: str) -> None:
             # client_id is a long hash; the tail is unique enough to name a dir.
             speaker = (row.get("client_id") or "")[-16:] or None
             stager.add(source, speaker, f"{source}_{clip.stem}",
-                       row.get("sentence") or "", path=clip)
+                       row.get("sentence") or "", path=clip,
+                       per_speaker=per_speaker)
             if number and number % 500 == 0:
                 print(f"  {number} rows, kept {stager.kept[source]:,}", flush=True)
 
@@ -199,23 +260,49 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--out", type=Path, default=PROJECT_ROOT / "data" / "studio_corpus")
     parser.add_argument("--data", type=Path, default=PROJECT_ROOT / "data")
+    parser.add_argument("--only", nargs="*", metavar="SOURCE",
+                        help="ingest only these sources (default: all)")
     args = parser.parse_args()
+    wanted = set(args.only) if args.only else None
 
     config = EngineConfig()
     seen = existing_transcripts(config)
-    print(f"{len(seen):,} transcripts already in the local corpus (deduped against)\n")
+    print(f"{len(seen):,} transcripts already in the local corpus")
+
+    # Anything already staged counts as seen too, so a re-run adds only what is
+    # new rather than rebuilding the corpus.
+    staged = staged_transcripts(args.out)
+    print(f"{len(staged):,} already staged in {args.out.name}")
+    seen |= staged
+    print(f"{len(seen):,} deduped against\n")
 
     args.out.mkdir(parents=True, exist_ok=True)
     stager = Stager(args.out, seen)
 
-    print("IroyinSpeech (Common Voice export)")
-    ingest_common_voice(stager, args.data / "IroyinSpeech", "iroyin")
+    def run(source: str, label: str, action) -> None:
+        if wanted is not None and source not in wanted:
+            return
+        print(label)
+        action()
+        print()
 
-    print("\nAt-Tawheed yoruba-tts-ljspeech")
-    ingest_parquet(stager, [args.data / "train-00000-of-00001.parquet"], "ljspeech")
+    run("iroyin", "IroyinSpeech (Common Voice export)",
+        lambda: ingest_common_voice(stager, args.data / "IroyinSpeech", "iroyin"))
 
-    print("\nthisniyi cv_and_openslr")
-    ingest_parquet(stager, sorted(args.data.glob("thisniyi_*.parquet")), "thisniyi")
+    # Common Voice 26.0 is the canonical release IroyinSpeech was cut from, so
+    # most of it deduplicates away. It is ingested for the residue: a few
+    # hundred sentences and a dozen or so speakers the earlier export predates.
+    run("commonvoice", "Common Voice Scripted Speech 26.0 (CC0)",
+        lambda: ingest_common_voice(
+            stager, args.data / "cv-corpus-26.0-2026-06-12" / "yo", "commonvoice"))
+
+    run("ljspeech", "At-Tawheed yoruba-tts-ljspeech",
+        lambda: ingest_parquet(
+            stager, [args.data / "train-00000-of-00001.parquet"], "ljspeech"))
+
+    run("thisniyi", "thisniyi cv_and_openslr",
+        lambda: ingest_parquet(
+            stager, sorted(args.data.glob("thisniyi_*.parquet")), "thisniyi"))
 
     print(f"\n{'source':<12}{'utterances':>12}{'hours':>9}{'speakers':>10}")
     for source in sorted(stager.kept):

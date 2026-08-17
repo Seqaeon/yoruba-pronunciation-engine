@@ -66,20 +66,62 @@ deduplicates on transcript, which is why only 334 of several thousand clips
 survived. Included because the residue is genuinely new, but it is the
 smallest contributor by an order of magnitude.
 
+### Common Voice Scripted Speech 26.0 — Yoruba
+
+<https://mozilladatacollective.com/datasets/cmqi6qutc00gmo507myna6k5s>
+
+448 clips kept · 0.74 h · from 3,514 validated · **CC0-1.0**
+
+Fully diacritized — 3,514 of 3,514 validated sentences carry tone marks and
+sub-dots — and public domain, so it carries no distribution conditions at all.
+
+The yield is small because IroyinSpeech is a subset of an earlier Common Voice
+release: 3,062 clips are byte-identical between them. What remains is 448
+recordings and 14 speakers the earlier export predates. Ingesting it forced the
+deduplication rule to be corrected, which was worth more than the audio — see
+`scripts/ingest_studio.py`. Under the old transcript-only rule this contributed
+116 clips; keying on speaker as well recovered the other 332.
+
 ### Combined studio corpus
 
-`data/studio_corpus` — **5,464 clips · 7.19 h** across the three sources above.
-With SLR86 that is **9,047 clips · 11.21 h** of aligned Yoruba speech.
+`data/studio_corpus` — **5,912 clips · 7.93 h** across the four sources above.
+With SLR86 that is **9,495 clips · 11.96 h** of aligned Yoruba speech.
 
 ## Downloaded but not used
 
-**Yoruba-TTS-Dataset** (local, 1,954 mp3 clips across 7 batches). It has an
-ingestion path in `scripts/prepare_dataset.py` but is not in either final
-corpus. Left in place rather than deleted so the decision can be revisited —
-it is real studio-domain audio and would be the cheapest next increment.
+**Yoruba-TTS-Dataset** — 1,954 mp3 clips, ~5.8 h. Two independent blockers.
+
+Not one of its 1,975 transcripts carries a diacritic: they are in missionary
+orthography, so `yóò yí orúkọ` is written `yoo yi oruko`. That collapses `ẹ`/`e`
+and `ọ`/`o`, which are exactly the contrasts the vowel classifier is weakest on,
+and leaves no tone information at all. Diacritic restoration could recover some
+of it, at the cost of injecting label noise into the most fragile classes.
+
+Its licence is NOODL-1.0, research-only, forbidding commercial use and
+redistribution — so it cannot ship in a commercial product regardless.
+
+Available at
+<https://mozilladatacollective.com/datasets/cmo1nlaah0071mk077mw0qhpv>; there is
+an ingestion path in `scripts/prepare_dataset.py` that is deliberately not run.
 
 **google/WaxalNLP** and **michsethowusu/yoruba-speech-text-parallel** were
 evaluated during the dataset search and not ingested.
+
+## Worth pursuing
+
+**YECS — Yoruba-English Code-Switching Corpus** (LyngualLabs),
+<https://mozilladatacollective.com/datasets/cmo09pqp300gbnx07xcl42los>
+
+120 hours, 99,930 validated pairs, 140 speakers, with *verified* tone marks and
+word-level language tags — an order of magnitude beyond everything above
+combined, from the same producer as the shipped feature extractor. Access is by
+request.
+
+Two conditions before building on it. It is code-switched, so Yoruba-only spans
+have to be selected using the language tags. And NOODL-1.0 grants open use to
+developers in developing nations while requiring benefit-sharing negotiation
+with LyngualLabs for commercial entities in high-income countries, which needs
+settling against the intended distribution before it becomes a dependency.
 
 ## Models
 
