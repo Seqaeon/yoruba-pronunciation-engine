@@ -45,18 +45,24 @@ logger = get_logger("decoder")
 #: corpus speech. Every one was read correctly by a native speaker, so any
 #: substitution claimed there is a false alarm:
 #:
-#:     margin   0.0    1.0    2.0    2.5    3.0    4.0    5.0
-#:     wrong   31.2%  16.7%   7.4%   4.8%   3.2%   1.3%   0.7%
+#:     margin        0.0    1.0    1.5    2.0    2.5    3.0    4.0
+#:     39 features  31.2%  16.7%    --    7.4%   4.8%   3.2%   1.3%
+#:     wav2vec2     22.2%   5.3%   2.5%   1.5%   1.1%   0.5%   0.3%
 #:
-#: A decoder that always names its best guess (margin 0) contradicts a third of
-#: correctly spoken words, which is why abstention is not optional here.
+#: A decoder that always names its best guess (margin 0) still contradicts a
+#: fifth of correctly spoken words, so abstention remains necessary.
 #:
-#: 3.0 is chosen rather than the 4.4%-at-2.5 that a 5% target would pick,
-#: because real substitutions in the recorded test attempts won by 4.0 and 4.5
-#: log units -- comfortably clear of 3.0 -- so the extra strictness costs
-#: little recall and halves the false-alarm rate. Telling a learner they made a
-#: mistake they did not make is the expensive error.
-DEFAULT_MARGIN = 3.0
+#: 2.0 with the learned features. The old 3.0 was set to hold false alarms near
+#: 3% with a classifier of 59.5% accuracy; the same 3.0 now yields 0.5%, so the
+#: strictness was buying protection no longer needed and costing recall on
+#: marginal substitutions. 2.0 is *less* strict than what shipped before and
+#: still less than half its false-alarm rate -- better on both axes.
+#:
+#: Worth knowing what the residual errors are. At 1.5 they are dominated by
+#: diacritic variants of the same word -- mò -> mo, ìlù -> ìlú, jé -> jẹ́,
+#: sílè -> sílẹ̀ -- rather than semantically wrong words, so the practical error
+#: rate is milder than the number suggests.
+DEFAULT_MARGIN = 2.0
 
 #: Weight on the unigram prior, in the same log units as the acoustic score.
 #:

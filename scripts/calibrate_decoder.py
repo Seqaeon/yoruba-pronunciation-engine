@@ -22,17 +22,26 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from yoruba_engine.alignment.textgrid import alignment_from_textgrid  # noqa: E402
 from yoruba_engine.config import EngineConfig  # noqa: E402
 from yoruba_engine.g2p.orthography import normalize  # noqa: E402
-from yoruba_engine.pitch.extractor import is_vowel_phone  # noqa: E402
-from yoruba_engine.segmental.classifier import VowelClassifier, vowel_features  # noqa: E402
+from yoruba_engine.segmental.classifier import VowelClassifier  # noqa: E402
+from yoruba_engine.segmental.verifier import (  # noqa: E402
+    VowelVerifier, words_from_alignment,
+)
 from yoruba_engine.segmental.decoder import WordDecoder  # noqa: E402
-from yoruba_engine.segmental.formants import FormantExtractor, normalize_vowel_space  # noqa: E402
-from yoruba_engine.segmental.mfcc import MFCCExtractor  # noqa: E402
 
 
 def collect(config: EngineConfig, aligned: Path, limit: int | None):
-    """Return (word, [vowel distributions]) for every aligned word."""
+    """Return (word, [vowel distributions]) for every aligned word.
+
+    Distributions come from the verifier rather than being rebuilt here, so the
+    feature backend the classifier declares is used automatically. Rebuilding
+    them locally is what made this script -- and calibrate_suspect.py -- break
+    with "X has 39 features, but HistGradientBoostingClassifier is expecting
+    1024" the moment the model changed. A calibration script that measures a
+    different feature path than production uses is worse than no calibration.
+    """
     classifier = VowelClassifier.load()
-    formant_extractor, mfcc_extractor = FormantExtractor(), MFCCExtractor()
+    verifier = VowelVerifier(classifier, config.segmental)
+    print(f"backend: {'wav2vec2' if verifier.uses_wav2vec else 'Praat measurements'}")
     audio_index = {p.stem: p for p in config.audio_dir.rglob("*.wav")}
 
     collected = []
@@ -43,33 +52,13 @@ def collect(config: EngineConfig, aligned: Path, limit: int | None):
             continue
         try:
             alignment = alignment_from_textgrid(textgrid, utterance_id=textgrid.stem)
-            formants = formant_extractor.analyse(audio)
-            times, frames = mfcc_extractor.analyse(audio)
+            words = words_from_alignment(alignment)
+            result = verifier.verify(audio, words)
         except Exception:
             continue
-
-        measured = []
-        for phone in alignment.phones:
-            if not is_vowel_phone(phone.label):
-                continue
-            f = formant_extractor.measure_segment(formants, phone.start_s, phone.end_s)
-            c = mfcc_extractor.measure_segment(times, frames, phone.start_s, phone.end_s)
-            if f and c:
-                measured.append((phone, f, c))
-        if not measured:
-            continue
-
-        speaker_f1, speaker_f2 = normalize_vowel_space([m[1] for m in measured])
-        distributions = classifier.model.predict_proba(
-            [vowel_features(f, speaker_f1, speaker_f2) + list(c) for _, f, c in measured]
-        )
-        for word in alignment.words:
-            inside = [
-                d for (phone, _, _), d in zip(measured, distributions)
-                if word.start_s <= (phone.start_s + phone.end_s) / 2 <= word.end_s
-            ]
-            if inside:
-                collected.append((normalize(word.label), inside))
+        for index, distributions in result.distributions.items():
+            if index < len(words) and distributions:
+                collected.append((normalize(words[index].word), distributions))
         if number % 100 == 0:
             print(f"  {number}/{len(textgrids)} utterances", flush=True)
     return collected, classifier

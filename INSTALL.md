@@ -13,7 +13,9 @@ The engine drives MFA as a **subprocess**, never as an import. That is what lets
 a plain virtualenv run the whole pipeline while MFA lives in its own conda
 environment — no environment juggling, and no need to activate conda.
 
-Total install: about 6 GB, most of it MFA.
+Total install: about 8 GB. MFA accounts for 1.65 GB with a CPU-only Kaldi
+(5.34 GB if conda resolves the CUDA build -- pin it, see step 2), the
+speech model for vowel identity is 1.26 GB, and the trained artifacts are 64 MB.
 
 ## 1. System prerequisites
 
@@ -55,7 +57,7 @@ chmod +x ~/.local/bin/micromamba
 # Create the aligner environment inside the project
 export MAMBA_ROOT_PREFIX=~/.local/share/mamba
 ~/.local/bin/micromamba create -y -p .mfa-env \
-  -c conda-forge python=3.11 montreal-forced-aligner
+  -c conda-forge python=3.11 montreal-forced-aligner=3.4.1 "kaldi=*=cpu*"
 ```
 
 macOS: replace `linux-64` with `osx-64` (Intel) or `osx-arm64` (Apple silicon).
@@ -65,6 +67,26 @@ Verify:
 ```bash
 .mfa-env/bin/mfa version      # expect 3.x
 ```
+
+### Why the Kaldi build is pinned
+
+`"kaldi=*=cpu*"` is not decoration. Unpinned, conda resolves per machine: a box
+with CUDA present gets a GPU build whose every Kaldi binary links
+`libcuda.so.1` — from the NVIDIA *driver*, not from the environment — so those
+binaries will not even load on a CPU-only server:
+
+```
+error while loading shared libraries: libcuda.so.1: cannot open shared object file
+```
+
+It is also 5.34 GB against 1.65 GB, and 3.68 GB of that is CUDA math libraries
+(`libmagma` alone is 1.26 GB) that forced alignment never meaningfully uses.
+
+Pin MFA's version too. `models/gop_reference.json` and
+`models/word_duration_stats.json` are measurements of one specific aligner's
+behaviour — per-phone likelihood means and 5th-percentile durations. A different
+Kaldi build shifts boundaries, both files become quietly wrong, and nothing
+raises an error; the feedback just degrades.
 
 ### How the engine finds MFA
 
@@ -113,6 +135,33 @@ pip install -e ".[dev]"               # pytest, mypy, ruff
 Parselmouth is strongly recommended. Without it the engine falls back to a
 pure-Python pitch tracker that is accurate enough for tests but not for
 production.
+
+## 3b. Speech model for vowel identity
+
+```bash
+mkdir -p models/lyngual-yoruba
+wget -c -O models/lyngual-yoruba/model.safetensors \
+  https://huggingface.co/LyngualLabs/mms-300m-yoruba-english/resolve/main/model.safetensors
+
+python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" \
+  models/lyngual-yoruba/model.safetensors
+# expect 766a4e6c9c98fbb59bb4a2850c0ab0677a1197969564f28aab9b50815368aeb3
+```
+
+1.26 GB. The config files it needs (`config.json`, `vocab.json`, and four more,
+about 5 KB total) are already committed under `models/lyngual-yoruba/`.
+
+Use `wget -c`, not the `huggingface_hub` downloader, if you need to resume an
+interrupted transfer. HuggingFace **preallocates the blob to its full final
+size**, so a partial download looks complete to anything reading the file
+length -- `ls`, `stat`, and `curl -C -` all resume from the wrong offset and
+produce a corrupt file that passes a size check and fails its hash. `du -k`
+(allocated blocks) is the only honest progress measure on a partial HF blob.
+
+This step is optional. Without it the engine logs a warning and disables
+vowel-identity checking; alignment, omission detection, tone comparison and GOP
+all still work. Which feature backend is used is read from the classifier's own
+metadata, so a mismatch cannot happen silently.
 
 ## 4. Verify
 

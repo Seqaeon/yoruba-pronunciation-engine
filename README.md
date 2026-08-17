@@ -39,35 +39,92 @@ Tone mismatch on first vowel.
 
 ## Current state
 
-Trained and running end to end. The acoustic model, tone classifier and vowel
-classifier all exist and are calibrated against each other.
+Trained and running end to end. Vowel identity uses a self-supervised speech
+model; alignment, tone and duration remain MFA-based.
 
 | | |
 |---|---|
 | Acoustic model | **37.9 h**, 106,441 utterances, 2,047 speaker groups |
-| Sources | michsethowusu 24.0 h, WaxalNLP 6.3 h, Yoruba-TTS 4.2 h, SLR86 3.5 h |
 | Alignment | **99.65%** of training utterances; **100%** of the 3,583-utterance local corpus |
 | Dictionary | 9,092 entries, 31 phones, 0 G2P failures |
-| Studio corpus (classifier) | +5,464 utterances, 7.26 h, 141 speakers (IroyinSpeech, LJSpeech, CV) |
-| Tone detection | **73.0%** held out, speaker-disjoint (chance 38.1%) |
-| Vowel identity | **59.5%** / macro F1 0.432 on 44 held-out **studio** speakers |
-| Omission detection | **95.9%** caught at 4.6% false alarms |
-| Substitution (GOP) | **87.9%** caught at 2.0% false alarms |
-| Tests | 146 passing |
+| Vowel identity | **87.3%** / macro F1 **0.811** on 31 held-out **studio** speakers |
+| Tone detection | 73.0% held out, speaker-disjoint (chance 38.1%) |
+| Omission detection | 95.9% caught at 4.6% false alarms |
+| Substitution, vowel check | **94.0%** caught at 3.8% false alarms |
+| Substitution, GOP | 87.9% caught at 2.0% false alarms |
+| Naming what was said | 1.5% false-substitution rate |
+| Tests | **183 passing** |
 
-Two notes on reading these numbers, both learned the hard way:
+### The features were the ceiling, not the data
 
-**The vowel figure is deliberately unflattering.** Earlier versions of this table
-reported 73%, measured on a held-out set that pooled studio and crowdsourced
-speakers. Because 94.5% of training audio is crowdsourced, those held-out
-speakers were the same domain as training and inflated everything — the `un`/`an`
-contrast read 92.9% pooled and **69.7%** on studio speech alone. Learners record
-in studio-ish conditions, so studio-only is the only honest number.
+Vowel identity ran at 59.5% for most of this project's life on 39 hand-designed
+measurements: three formants, three formant bandwidths, and 13 cepstral means
+with their standard deviations. Replacing them with a mean-pooled layer of a
+Yoruba-fine-tuned wav2vec2 model, changing nothing else:
 
-**Thresholds are calibrated on learner audio, not corpus audio.** The omission
-threshold was briefly set from corpus speech and produced false "you did not say
-this" reports on real attempts, because the aligner fits an unfamiliar voice
-less tightly. See `scripts/calibrate_omissions.py`.
+| features | dims | accuracy | macro F1 | an | En | in | On | un |
+|---|---|---|---|---|---|---|---|---|
+| 39 hand-designed | 39 | 0.595 | 0.432 | 0.249 | 0.009 | 0.129 | 0.307 | 0.256 |
+| **wav2vec2 layer 16** | 1024 | **0.873** | **0.811** | **0.791** | **0.714** | **0.696** | **0.813** | **0.718** |
+| both concatenated | 1063 | 0.876 | 0.812 | 0.779 | 0.727 | 0.666 | 0.811 | 0.727 |
+
+Nasal F1 improves 3–5×. All six minimal-pair contrasts now clear 91%:
+
+```
+un~an 95.8%   an~un 92.6%      (òkan / òkun)
+o~ọ   92.9%   ọ~o   95.2%      (òkun / ọkun)
+e~ẹ   91.6%   ẹ~e   94.2%
+```
+
+Two things worth taking from that table. **Concatenating the old features adds
++0.0006 macro F1** — noise — so Praat is no longer used for vowel identity at
+all, only for pitch. And `ẹn`, which this README previously described as
+unlearnable at F1 0.009 (364 tokens across seven corpora, 63% of them the single
+word *yẹn*), reaches **0.714**. It was unlearnable with 39 numbers; the data was
+always sufficient.
+
+Layer 16 of 24, not the last — a CTC model's final layer is optimised to predict
+characters, and that objective discards the detail separating `an` from `un`:
+
+```
+layer      4      8     12     16     20     24
+accuracy 0.703  0.763  0.780  0.798  0.785  0.771
+```
+
+### Thresholds are calibrated, and re-calibrated when the model changes
+
+Every operating point is measured from both error directions rather than chosen.
+Improving the classifier made all of them better *and* changed where they belong:
+
+| threshold | before | after | effect |
+|---|---|---|---|
+| `suspect_probability` / `weak_probability` | 0.02 / 0.15 | **0.20 / 0.30** | caught 66.3% → **94.0%** |
+| decoder `DEFAULT_MARGIN` | 3.0 | **2.0** | false 3.2% → **1.5%** |
+| `min_duration_fraction` | 0.5 | 0.6 | omissions 78.2% → 95.9% |
+
+Two lessons learned the hard way, both encoded in the scripts:
+
+**Calibrate on the audio you will judge.** The omission threshold was briefly
+set to 0.8 from corpus speech and produced false "you did not say this" reports
+on real learner recordings, where the aligner fits an unfamiliar voice less
+tightly. See `scripts/calibrate_omissions.py`.
+
+**Evaluate on the domain you will serve.** An earlier held-out set pooled studio
+and crowdsourced speakers; because 94.5% of training audio is crowdsourced, that
+inflated everything — the `un`/`an` contrast read 92.9% pooled and 69.7% on
+studio speech alone. All figures above are studio-only.
+
+### MFA stays
+
+CTC forced alignment was evaluated as a replacement, which would have removed
+1.65 GB of Kaldi and a ~35 s per-call startup. It aligns 200/200 utterances in
+real Yoruba orthography with no romanization, and after trimming silence with a
+15-line energy VAD its **word** boundaries agree with MFA to 40 ms median.
+
+But nothing downstream reads words. On **phone** spans — what GOP, the classifier
+and the duration model actually consume — the median vowel duration error is
+**52% of a typical 97 ms vowel**. Not adequate. `scripts/ctc_align_compare.py`,
+`ctc_align_trimmed.py` and `ctc_phone_precision.py` retain the measurements.
 
 ## Quick start
 
@@ -80,10 +137,14 @@ pip install -e . -r requirements.txt
 # 2. Fetch the trained artifacts (64 MB, verified against models/MANIFEST.json)
 python scripts/fetch_models.py
 
-# 3. Check everything resolved
+# 3. Fetch the speech model used for vowel identity (1.26 GB)
+mkdir -p models/lyngual-yoruba && wget -c -O models/lyngual-yoruba/model.safetensors \
+    https://huggingface.co/LyngualLabs/mms-300m-yoruba-english/resolve/main/model.safetensors
+
+# 4. Check everything resolved
 python -m yoruba_engine.cli health
 
-# 4. Assess a recording
+# 5. Assess a recording
 python -m yoruba_engine.cli assess \
     --reference data/corpus/wavs/yof_00295_00099759266.wav \
     --learner uploads/learner.wav \
@@ -121,7 +182,33 @@ pip install -e . -r requirements.txt
 
 Plain pip. `praat-parselmouth`, `scikit-learn`, `soundfile`, `numpy`, `joblib`.
 
-### 3. Trained artifacts
+### 3. The speech model for vowel identity
+
+```bash
+mkdir -p models/lyngual-yoruba
+wget -c -O models/lyngual-yoruba/model.safetensors \
+  https://huggingface.co/LyngualLabs/mms-300m-yoruba-english/resolve/main/model.safetensors
+```
+
+1.26 GB, `Wav2Vec2ForCTC`, 300M parameters. Its 97-token vocabulary carries every
+distinction the engine reasons about — `ẹ ọ ṣ`, all eight tone-marked vowels, and
+the syllabic nasals `ń ǹ`. A romanized model would have folded those away before
+the audio was ever seen.
+
+Inference runs at about **4.7× realtime on CPU**, so no GPU is needed to serve —
+0.64 s against forced alignment's ~35 s is invisible. Resident memory is roughly
+2.5 GB, which is what sets the 8 GB recommendation below.
+
+Without it the engine still runs: omission detection, tone comparison and GOP all
+work, and `VowelVerifier` logs a warning and disables vowel-identity checking
+rather than failing. Which backend is used is read from the classifier's own
+metadata, never guessed.
+
+The Apache-2.0 tag on that repository sits on weights derived from
+`facebook/mms-300m`, which Meta licenses CC-BY-NC-4.0. That tag is the uploader's
+assertion, not an audit — verify before shipping commercially.
+
+### 4. Trained artifacts
 
 ```bash
 python scripts/fetch_models.py          # download and verify
@@ -151,6 +238,21 @@ python scripts/build_gop_reference.py         # per-phone likelihood means
 python scripts/train_tone_classifier.py       # tone, on the new boundaries
 python scripts/build_word_frequency.py        # decoder prior
 ```
+
+Changing the **classifier** invalidates a different set — the probability
+thresholds, because a sharper model produces differently-scaled distributions:
+
+```bash
+python scripts/calibrate_suspect.py    # suspect / weak probabilities
+python scripts/calibrate_decoder.py    # decoder margin
+python scripts/calibrate_omissions.py  # duration fraction
+```
+
+Both calibration scripts score through `VowelVerifier` rather than rebuilding
+feature rows, so they follow whatever backend the classifier declares. They used
+to hard-code the 39-measurement layout and broke the moment the model changed —
+a calibration script measuring a different path than production is worse than no
+calibration.
 
 ## The datasets
 

@@ -31,6 +31,35 @@ from .mfcc import MFCCExtractor, cepstral_mean_variance, normalize_vector
 logger = get_logger("segmental.verifier")
 
 
+def words_from_alignment(alignment) -> list[WordAnalysis]:
+    """Build the word/vowel structure the verifier expects from an alignment.
+
+    Calibration scripts need to score aligned corpus speech without running
+    pitch extraction. They used to rebuild the feature rows themselves, which
+    meant every one of them hard-coded the 39-measurement layout -- and all of
+    them broke the moment the classifier moved to learned features. Going
+    through :class:`VowelVerifier` instead means the backend is chosen once, by
+    the model, and the scripts never need to know which it is.
+    """
+    from ..pitch.extractor import is_vowel_phone  # noqa: PLC0415
+    from ..datatypes import VowelSegment  # noqa: PLC0415
+
+    words: list[WordAnalysis] = []
+    for index, word in enumerate(alignment.words):
+        inside = [p for p in alignment.phones
+                  if word.start_s <= (p.start_s + p.end_s) / 2 <= word.end_s]
+        words.append(WordAnalysis(
+            word=word.label,
+            start_s=word.start_s,
+            end_s=word.end_s,
+            phone_count=len(inside),
+            vowels=[VowelSegment(label=p.label, start_s=p.start_s, end_s=p.end_s,
+                                 word_index=index)
+                    for p in inside if is_vowel_phone(p.label)],
+        ))
+    return words
+
+
 @dataclass
 class VowelCheck:
     """One vowel's verification result."""
@@ -86,9 +115,30 @@ class VowelVerifier:
         """
         self.classifier = classifier
         self.config = config or SegmentalConfig()
+        self._label_index = {label: i for i, label in enumerate(classifier.labels)}
+
+        # Which feature backend to use is the classifier's business, not the
+        # caller's. A model records what it was trained on, and feeding it
+        # anything else is the failure this project has now hit twice: a
+        # normalization mismatch once scored a correctly spoken word at
+        # p = 0.002, and a 33-feature model raised ValueError on 39 features.
+        # Reading it from metadata makes that mismatch impossible rather than
+        # merely unlikely.
+        kind = str(classifier.metadata.get("features_kind", ""))
+        self.uses_wav2vec = "wav2vec" in kind
         self.formants = FormantExtractor()
         self.mfcc = MFCCExtractor()
-        self._label_index = {label: i for i, label in enumerate(classifier.labels)}
+        self.wav2vec = None
+        if self.uses_wav2vec:
+            from .wav2vec import Wav2VecExtractor  # noqa: PLC0415
+
+            self.wav2vec = Wav2VecExtractor(
+                layer=int(classifier.metadata.get("wav2vec_layer", 16)))
+            if not self.wav2vec.available:
+                logger.warning(
+                    "Classifier expects wav2vec2 features but no checkpoint is "
+                    "present; vowel identity checking is disabled")
+                self.wav2vec = None
 
     def verify(self, audio_path: Path, words: list[WordAnalysis]) -> SegmentalResult:
         """Check every measurable vowel in the utterance.
@@ -104,6 +154,8 @@ class VowelVerifier:
             be reported as a wrong one.
         """
         result = SegmentalResult()
+        if self.uses_wav2vec:
+            return self._verify_learned(audio_path, words, result)
 
         try:
             formant_track = self.formants.analyse(audio_path)
@@ -187,6 +239,58 @@ class VowelVerifier:
             ))
 
         result.measured_vowels = len(result.checks)
+        result.mispronounced = self._flag_words(result.checks, words)
+        return result
+
+    def _verify_learned(self, audio_path: Path, words: list[WordAnalysis],
+                        result: SegmentalResult) -> SegmentalResult:
+        """Score vowels from mean-pooled transformer frames.
+
+        Shorter than the cepstral path because there is nothing to normalize.
+        The model's own pretraining already absorbs speaker and channel
+        variation, so no per-speaker statistics are estimated -- which removes
+        the whole class of bug that per-utterance normalization introduced, where
+        a mean taken over three vowels deleted the vowel identity it was meant
+        to preserve.
+        """
+        if self.wav2vec is None:
+            return result
+        try:
+            times, frames = self.wav2vec.analyse(audio_path)
+        except Exception as exc:
+            logger.info("Learned features unavailable for %s: %s", audio_path.name, exc)
+            return result
+
+        entries, rows = [], []
+        for word_index, word in enumerate(words):
+            for vowel_index, vowel in enumerate(word.vowels):
+                values = self.wav2vec.measure_segment(
+                    times, frames, vowel.start_s, vowel.end_s)
+                if values:
+                    entries.append((word_index, vowel_index, vowel.label))
+                    rows.append(values)
+        if not rows:
+            return result
+
+        probabilities = self.classifier.model.predict_proba(rows)
+        for (word_index, _, _), distribution in zip(entries, probabilities):
+            result.distributions.setdefault(word_index, []).append(distribution)
+
+        for (word_index, vowel_index, label), distribution in zip(entries, probabilities):
+            expected = label.split("_")[0]
+            position = self._label_index.get(expected)
+            if position is None:
+                continue
+            best = max(range(len(distribution)), key=distribution.__getitem__)
+            result.checks.append(VowelCheck(
+                word_index=word_index,
+                vowel_index=vowel_index,
+                expected=expected,
+                predicted=self.classifier.labels[best],
+                expected_probability=float(distribution[position]),
+                suspect_threshold=self.config.suspect_probability,
+            ))
+        result.measured_vowels = len(entries)
         result.mispronounced = self._flag_words(result.checks, words)
         return result
 

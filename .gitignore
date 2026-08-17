@@ -63,3 +63,9 @@ kaggle_model/
 
 # Duplicate of data/dictionary/yoruba.dict, which is the path the engine reads.
 models/yoruba.dict
+
+# Speech model weights for vowel identity (1.26 GB). Fetched per INSTALL.md and
+# verified by sha256; the small config files beside them ARE committed, since the
+# checkpoint is useless without its vocabulary and 5 KB costs nothing.
+models/**/*.safetensors
+models/**/*.bin

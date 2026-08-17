@@ -28,8 +28,6 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-import numpy as np
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
@@ -37,10 +35,10 @@ from yoruba_engine.alignment.textgrid import alignment_from_textgrid  # noqa: E4
 from yoruba_engine.config import EngineConfig  # noqa: E402
 from yoruba_engine.g2p.dictionary import grapheme_to_phonemes  # noqa: E402
 from yoruba_engine.g2p.orthography import normalize, tokenize  # noqa: E402
-from yoruba_engine.pitch.extractor import is_vowel_phone  # noqa: E402
-from yoruba_engine.segmental.classifier import VowelClassifier, vowel_features  # noqa: E402
-from yoruba_engine.segmental.formants import FormantExtractor, normalize_vowel_space  # noqa: E402
-from yoruba_engine.segmental.mfcc import MFCCExtractor  # noqa: E402
+from yoruba_engine.segmental.classifier import VowelClassifier  # noqa: E402
+from yoruba_engine.segmental.verifier import (  # noqa: E402
+    VowelVerifier, words_from_alignment,
+)
 
 
 def vowels_of(word: str):
@@ -118,46 +116,34 @@ def align(config: EngineConfig, corpus: Path, out: Path):
     return sorted(out.rglob("*.TextGrid"))
 
 
-def measure(textgrids, audio_root: Path, classifier, target_index=None):
-    """Return per-word lists of P(expected) for each measured vowel."""
-    formant_extractor, mfcc_extractor = FormantExtractor(), MFCCExtractor()
-    position = {label: i for i, label in enumerate(classifier.labels)}
+def measure(textgrids, audio_root: Path, verifier):
+    """Return per-word lists of P(expected) for each measured vowel.
+
+    Scoring goes through the verifier rather than rebuilding feature rows here,
+    so whichever backend the classifier declares -- Praat measurements or
+    wav2vec2 frames -- is used automatically. An earlier version of this script
+    hard-coded the 39-measurement layout and died with "X has 39 features, but
+    HistGradientBoostingClassifier is expecting 1024" the moment the model
+    changed.
+    """
     audio_index = {p.stem: p for p in audio_root.rglob("*.wav")}
     out = defaultdict(dict)
 
-    for textgrid in textgrids:
+    for number, textgrid in enumerate(textgrids, start=1):
         audio = audio_index.get(textgrid.stem)
         if audio is None:
             continue
         try:
             alignment = alignment_from_textgrid(textgrid, utterance_id=textgrid.stem)
-            formants = formant_extractor.analyse(audio)
-            times, frames = mfcc_extractor.analyse(audio)
+            words = words_from_alignment(alignment)
+            result = verifier.verify(audio, words)
         except Exception:
             continue
-        measured = []
-        for phone in alignment.phones:
-            if not is_vowel_phone(phone.label):
-                continue
-            f = formant_extractor.measure_segment(formants, phone.start_s, phone.end_s)
-            c = mfcc_extractor.measure_segment(times, frames, phone.start_s, phone.end_s)
-            if f and c:
-                measured.append((phone, f, c))
-        if not measured:
-            continue
-        f1, f2 = normalize_vowel_space([m[1] for m in measured])
-        proba = classifier.model.predict_proba(
-            [vowel_features(f, f1, f2) + list(c) for _, f, c in measured])
-        for index, word in enumerate(alignment.words):
-            values = []
-            for (phone, _, _), distribution in zip(measured, proba):
-                if not (word.start_s <= (phone.start_s + phone.end_s) / 2 <= word.end_s):
-                    continue
-                expected = phone.label.split("_")[0]
-                if expected in position:
-                    values.append(float(distribution[position[expected]]))
-            if values:
-                out[textgrid.stem][index] = values
+        for check in result.checks:
+            out[textgrid.stem].setdefault(check.word_index, []).append(
+                check.expected_probability)
+        if number % 100 == 0:
+            print(f"    {number}/{len(textgrids)}", flush=True)
     return out
 
 
@@ -174,12 +160,14 @@ def main() -> int:
     print(f"staged {len(swapped)}")
 
     classifier = VowelClassifier.load()
+    verifier = VowelVerifier(classifier, config.segmental)
+    print(f"backend: {'wav2vec2' if verifier.uses_wav2vec else 'Praat measurements'}")
     true_grids = align(config, args.staging / "true", args.staging / "aligned_true")
     swap_grids = align(config, args.staging / "swapped", args.staging / "aligned_swapped")
     print(f"aligned {len(true_grids)} true, {len(swap_grids)} swapped\n")
 
-    true_words = measure(true_grids, args.staging / "true", classifier)
-    swap_words = measure(swap_grids, args.staging / "swapped", classifier)
+    true_words = measure(true_grids, args.staging / "true", verifier)
+    swap_words = measure(swap_grids, args.staging / "swapped", verifier)
 
     correct, wrong = [], []
     for utt, (position, _, _) in swapped.items():

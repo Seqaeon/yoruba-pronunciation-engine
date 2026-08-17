@@ -97,11 +97,26 @@ class SegmentalConfig:
     #:     threshold 0.02 -> 3.4%
     #:     threshold 0.04 -> 7.5%
     #:
-    #: A clear substitution scored 0.002 and a subtle one 0.030, so 0.02 catches
-    #: the obvious cases at a tolerable false-query rate while missing close
-    #: pairs. Raising it catches more substitutions and queries more correct
-    #: speech; there is no setting that does both.
-    suspect_probability: float = 0.02
+    #: Recalibrated for the wav2vec2 classifier (accuracy 0.873, macro F1 0.811).
+    #: The learned features changed what these thresholds can buy. At the old
+    #: 0.02/0.15 the 39-feature model gave 6.1% false alarms for 66.3% of
+    #: substitutions caught; the same setting now gives **0.5% for 78.9%** --
+    #: better on both axes without touching a threshold. That headroom is spent
+    #: on recall instead:
+    #:
+    #:     suspect  weak  false alarms  caught
+    #:       0.02   0.15      0.5%       78.9%
+    #:       0.10   0.30      2.2%       90.5%
+    #:       0.15   0.30      3.1%       91.5%
+    #:       0.20   0.30      3.8%       94.0%   <- here
+    #:       0.30   0.30      5.8%       94.0%
+    #:
+    #: 0.20/0.30 is the measured optimum under recall-minus-twice-false-alarms.
+    #: Spending 3.8% is affordable now in a way it was not before: a flagged word
+    #: is no longer dropped from the learner side, so a false flag costs a
+    #: "check this word" note rather than marks. Only a substitution the decoder
+    #: can NAME rewrites the word and penalises the score.
+    suspect_probability: float = 0.20
 
     #: Extra corroboration for multi-vowel words: two independently suspect
     #: vowels is much rarer than one, so such words are queried even when no
@@ -122,14 +137,12 @@ class SegmentalConfig:
     #: The old 0.05 missed half of real substitutions -- the failure this check
     #: exists to prevent -- while spending only 3.6% on false alarms.
     #:
-    #: 0.15 rather than the 0.30 that maximises recall-minus-false-alarms,
-    #: because a flagged word is not merely queried in the report: the pipeline
-    #: drops it from the learner side, so it is scored as an error. At 11.2% a
-    #: correct reading would lose roughly a ninth of its text similarity to
-    #: false alarms. Going further needs the two uses separated -- a sensitive
-    #: threshold for "check this word" advice and a conservative one for
-    #: penalising the score.
-    weak_probability: float = 0.15
+    #: 0.30 with the learned features. The reason for the old, cautious 0.15 was
+    #: that a flagged word was deleted from the learner side and thus scored as
+    #: an error, so false alarms cost marks. Flags no longer do that, and the
+    #: classifier is far sharper, so the conservative setting was leaving
+    #: 15 points of recall unclaimed for no benefit.
+    weak_probability: float = 0.30
     min_weak_vowels: int = 2
 
 
