@@ -69,3 +69,8 @@ models/yoruba.dict
 # checkpoint is useless without its vocabulary and 5 KB costs nothing.
 models/**/*.safetensors
 models/**/*.bin
+
+# Converted copies of test recordings, dropped by helper scripts. The originals
+# live in tests/attempts/ and are themselves ignored.
+/my_attempt*.wav
+*_16k.wav

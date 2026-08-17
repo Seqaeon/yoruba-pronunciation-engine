@@ -290,7 +290,30 @@ python scripts/demo_assess.py \
     --text      "Àbùbùtán bíi omi òkun."
 ```
 
-Learner audio must be mono WAV:
+### Audio format
+
+**Any rate, any channel count.** Recordings are downmixed to mono and resampled
+to 16 kHz on the way into the aligner, so a phone recording at 48 kHz stereo
+scores the same as a hand-converted file.
+
+That was not always true, and the bug is worth knowing about because it failed
+quietly. The training corpus and every asset calibrated against it -- the
+5th-percentile word durations, the per-phone GOP means, the classifier's training
+spans -- were measured at 16 kHz. Feeding 48 kHz did not error; MFA resampled it
+internally and placed boundaries slightly differently, and thresholds measured at
+one rate were applied to spans from another. Measured on one learner recording:
+
+| | text similarity | `àbùbùtán` |
+|---|---|---|
+| 48 kHz stereo | 50% | **"not detected"** |
+| 16 kHz mono | 75% | present |
+
+Same audio. `MFAAligner.stage_audio` now normalises every recording, and both
+encodings produce identical scores. If you are building a corpus for *training*,
+still write 16 kHz WAVs up front -- it removes MFA's per-pass resampling cost,
+which is what made one local run 6x slower per hour of audio than a Kaggle one.
+
+Converting yourself is optional but harmless:
 
 ```bash
 ffmpeg -i input.m4a -ar 16000 -ac 1 -sample_fmt s16 my_attempt.wav

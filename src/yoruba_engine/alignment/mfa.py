@@ -26,6 +26,58 @@ from .textgrid import alignment_from_textgrid
 
 logger = get_logger("mfa")
 
+#: Rate every recording is resampled to before alignment.
+#:
+#: The training corpus was written at 16 kHz, and so were the assets calibrated
+#: against it: the 5th-percentile word durations, the per-phone GOP means, and
+#: the spans the vowel classifier learned from. Aligning audio at another rate
+#: does not fail -- MFA resamples internally -- it just places boundaries
+#: slightly differently, and every threshold measured at 16 kHz is then applied
+#: to spans that are not quite the same.
+#:
+#: Measured on one learner recording, 48 kHz stereo against the same audio
+#: converted to 16 kHz mono: text similarity 50% against 75%, and the word
+#: ``àbùbùtán`` reported as "not detected" in one and present in the other. The
+#: substitution was caught either way, so this is a quiet divergence rather than
+#: a loud failure, which is what makes it worth removing at the source instead
+#: of documenting as a caveat.
+ALIGNMENT_SAMPLE_RATE_HZ = 16000
+
+
+def stage_audio(source: Path, destination: Path,
+                sample_rate_hz: int = ALIGNMENT_SAMPLE_RATE_HZ) -> Path:
+    """Write ``source`` to ``destination`` as mono PCM WAV at ``sample_rate_hz``.
+
+    Phones and messaging apps hand out stereo, 24-bit, and 44.1/48 kHz audio.
+    Rather than requiring callers to remember the conversion -- and silently
+    scoring them differently when they forget -- every recording is normalised
+    on the way into the aligner.
+
+    Raises:
+        AlignmentError: If the audio cannot be read.
+    """
+    try:
+        import numpy as np  # noqa: PLC0415
+        import soundfile as sf  # noqa: PLC0415
+
+        samples, rate = sf.read(str(source), dtype="float32", always_2d=False)
+    except Exception as exc:
+        raise AlignmentError(f"Could not read audio {source}: {exc}") from exc
+
+    if getattr(samples, "ndim", 1) > 1:
+        samples = samples.mean(axis=1)          # downmix, do not pick a channel
+    if rate != sample_rate_hz:
+        count = max(int(len(samples) / rate * sample_rate_hz), 1)
+        samples = np.interp(
+            np.linspace(0, len(samples) - 1, count),
+            np.arange(len(samples)), samples,
+        ).astype("float32")
+        logger.debug("Resampled %s from %d to %d Hz", source.name, rate, sample_rate_hz)
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(destination), samples, sample_rate_hz, subtype="PCM_16")
+    return destination
+
 
 class MFAAligner:
     """Thin, reusable wrapper around the ``mfa`` command-line tool."""
@@ -367,8 +419,10 @@ class MFAAligner:
             corpus.mkdir(parents=True)
 
             # MFA's simplest corpus layout: matching .wav and .lab basenames.
-            staged_audio = corpus / f"{utt_id}{audio_path.suffix}"
-            shutil.copy2(audio_path, staged_audio)
+            # Normalised rather than copied, so the rate and channel count of
+            # whatever the learner recorded cannot shift the boundaries every
+            # downstream threshold was calibrated against.
+            stage_audio(audio_path, corpus / f"{utt_id}.wav")
             (corpus / f"{utt_id}.lab").write_text(transcript, encoding="utf-8")
 
             aligned = workdir / "aligned"
