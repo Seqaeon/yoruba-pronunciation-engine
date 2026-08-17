@@ -1,0 +1,65 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Generated artifacts
+output/
+data/mfa_corpus/
+
+# Trained models are too large for the repository. They are attached to a
+# GitHub Release and fetched by scripts/fetch_models.py, which verifies them
+# against models/MANIFEST.json.
+#
+# The dictionary is NOT ignored, despite being generated: it is 342 KB, and the
+# acoustic model is meaningless without the exact dictionary it was trained
+# against -- a mismatched phone set makes MFA emit nonsense without erroring.
+models/*.zip
+models/*.joblib
+
+# Feature caches from training. Regenerable with scripts/extract_vowel_features.py
+# and useless without the audio they were measured from, so they do not belong in
+# the repository -- and at ~28 MB they would dwarf everything that does.
+models/*.npz
+
+
+# Conda environment for MFA (5.5 GB, recreate via INSTALL.md)
+.mfa-env/
+
+# --- data/ -------------------------------------------------------------------
+# Everything under data/ is downloaded audio or derived from it: 4+ GB of
+# corpora, parquet shards, staged MFA corpora and unpacked archives. Listing
+# them individually was the bug -- each new dataset silently became committable,
+# and a single `git add -A` wrote 2.7 GB of blobs before it was noticed.
+#
+# So the rule is inverted: ignore data/ wholesale and name the few small text
+# files the engine genuinely cannot start without.
+data/*
+!data/dictionary/
+!data/corpus/
+
+data/dictionary/*
+!data/dictionary/yoruba.dict
+!data/dictionary/overrides.tsv
+
+data/corpus/*
+!data/corpus/.gitkeep
+
+# Recordings used for manual testing stay local.
+tests/attempts/*.wav
+
+# Downloaded Kaggle session output. Its acoustic model and dictionary are the
+# ones now installed in models/ and data/dictionary/, so this is a duplicate;
+# vowel_features.npz (96 MB) is a feature cache whose source audio lived on
+# /kaggle/temp and is gone. Worth archiving off-repo, not committing.
+kaggle_model/
+
+# Duplicate of data/dictionary/yoruba.dict, which is the path the engine reads.
+models/yoruba.dict

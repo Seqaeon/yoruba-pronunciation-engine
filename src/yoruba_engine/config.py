@@ -1,0 +1,311 @@
+"""Central configuration.
+
+All tunable thresholds live here rather than being scattered as literals, so a
+future API layer can override them per-request (e.g. a more forgiving tone
+threshold for absolute beginners).
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+@dataclass
+class PitchConfig:
+    """Parameters for Praat pitch extraction.
+
+    The defaults span the range actually measured in the training corpus:
+    male speakers median ~133 Hz (90-175 observed), female ~237 Hz (111-311).
+    Narrow further if you serve one demographic; it reduces octave errors.
+    """
+
+    floor_hz: float = 75.0
+    ceiling_hz: float = 350.0
+    time_step_s: float = 0.01
+    #: Ignore the first and last N% of a vowel, where coarticulation with
+    #: neighbouring consonants distorts F0.
+    edge_trim_ratio: float = 0.20
+    #: A vowel needs at least this many voiced frames to be analysable.
+    min_voiced_frames: int = 3
+
+
+@dataclass
+class ToneConfig:
+    """Thresholds for classifying a normalized pitch value as H, M, or L.
+
+    Values are in semitones relative to the speaker's own median F0, which makes
+    them speaker- and sex-independent. A Yoruba H/M/L system typically spans
+    roughly 6-8 semitones end to end.
+
+    These defaults were tuned by grid search against the orthographic tone labels
+    of the training corpus (see section 9 of the training notebook). They are
+    asymmetric because the per-utterance median sits above the centre of the
+    speaker's Mid register: Mid is the most frequent tone, but High tones pull
+    the median up. Re-run the sweep if you change corpus or microphone setup.
+    """
+
+    high_threshold_st: float = 0.6
+    low_threshold_st: float = -2.0
+
+    #: Yoruba tone is relative, so a vowel is judged partly against its
+    #: neighbours rather than on its absolute level alone. These weight how much
+    #: the difference from the previous and next vowel shifts the score. The
+    #: previous vowel matters more than the next: tone targets are approached
+    #: from the preceding syllable.
+    prev_weight: float = 0.2
+    next_weight: float = 0.1
+
+    #: Weight on the rise/fall across the vowel itself. A High following a Low
+    #: is realized as a rise, which a single averaged level discards.
+    slope_weight: float = 0.4
+    #: A falling/rising slope steeper than this suggests a contour tone or a
+    #: mis-segmented vowel; used to lower confidence, not to reclassify.
+    max_level_slope_st_per_s: float = 12.0
+    #: Below this confidence the tone is reported but flagged as uncertain.
+    min_confidence: float = 0.35
+
+
+@dataclass
+class SegmentalConfig:
+    """Thresholds for checking *which* vowel a learner produced.
+
+    Catches substitutions -- ``òkan`` for ``òkun`` -- which alignment and
+    duration checks cannot see, because the wrong word still occupies plausible
+    time.
+
+    The classifier behind this is 73.9% accurate, so its top prediction is not
+    trustworthy enough to contradict a learner. These thresholds instead ask how
+    much probability it gives the *expected* vowel, and require corroboration
+    before objecting. Measured on correctly produced corpus vowels, 5.2% fall
+    below 0.05 by chance, so two in one word is rare and one is not evidence.
+    """
+
+    #: A word is queried when *any* of its vowels gives the expected vowel less
+    #: probability than this.
+    #:
+    #: Requiring two suspect vowels was wrong: minimal pairs differ in exactly
+    #: one segment by definition, so ``òkun``/``òkan`` could never trigger it.
+    #:
+    #: Measured on 934 correctly-spoken corpus words with the class-balanced
+    #: classifier:
+    #:
+    #:     threshold 0.01 -> 1.6% of correct words queried
+    #:     threshold 0.02 -> 3.4%
+    #:     threshold 0.04 -> 7.5%
+    #:
+    #: A clear substitution scored 0.002 and a subtle one 0.030, so 0.02 catches
+    #: the obvious cases at a tolerable false-query rate while missing close
+    #: pairs. Raising it catches more substitutions and queries more correct
+    #: speech; there is no setting that does both.
+    suspect_probability: float = 0.02
+
+    #: Extra corroboration for multi-vowel words: two independently suspect
+    #: vowels is much rarer than one, so such words are queried even when no
+    #: single vowel falls below the strict threshold.
+    #:
+    #: Calibrated from both sides by ``scripts/calibrate_suspect.py``, which
+    #: aligns each utterance twice -- against its true transcript, and against
+    #: one with a single word swapped for a different real word of the same
+    #: vowel count. Over 1,600 known-correct and 199 known-wrong words:
+    #:
+    #:     suspect  weak  false alarms  substitutions caught
+    #:       0.02   0.05      3.6%            50.8%   <- was here
+    #:       0.02   0.15      6.1%            66.3%   <- now here
+    #:       0.02   0.30     11.2%            80.4%
+    #:       0.05   0.30     14.4%            86.4%
+    #:       0.30   0.30     42.9%            95.0%
+    #:
+    #: The old 0.05 missed half of real substitutions -- the failure this check
+    #: exists to prevent -- while spending only 3.6% on false alarms.
+    #:
+    #: 0.15 rather than the 0.30 that maximises recall-minus-false-alarms,
+    #: because a flagged word is not merely queried in the report: the pipeline
+    #: drops it from the learner side, so it is scored as an error. At 11.2% a
+    #: correct reading would lose roughly a ninth of its text similarity to
+    #: false alarms. Going further needs the two uses separated -- a sensitive
+    #: threshold for "check this word" advice and a conservative one for
+    #: penalising the score.
+    weak_probability: float = 0.15
+    min_weak_vowels: int = 2
+
+
+@dataclass
+class ScoringConfig:
+    """Weights for the composite pronunciation score."""
+
+    text_weight: float = 0.5
+    tone_weight: float = 0.5
+    #: Scores below this trigger "needs practice" feedback in the report.
+    pass_threshold: float = 0.70
+
+    #: Minimum fraction of the learner's recording that the aligned words must
+    #: occupy for the attempt to count as verified. Below this, the learner
+    #: probably said something other than the prompt, and the scores describe a
+    #: forced fit rather than a real match.
+    #:
+    #: Measured on the training corpus, correct alignments cover 40-92% of the
+    #: audio (1st-95th percentile, median 69%), while alignments forced against
+    #: the wrong text cover 22-53% (median 32%). The two distributions overlap,
+    #: so this check is a partial safeguard, not a solved problem: at 0.35 it
+    #: caught roughly half of deliberately mismatched utterances with under 1%
+    #: false rejections. Raise it to catch more at the cost of failing genuine
+    #: attempts; lower it to be more permissive.
+    min_speech_coverage: float = 0.35
+
+    #: How short a word may be, relative to the 5th-percentile duration for its
+    #: length, and still count as actually spoken.
+    #:
+    #: In prompted practice there is no recognizer, so "did the learner say this
+    #: word?" is answered from the alignment: a skipped word gets squeezed to
+    #: almost nothing because the aligner must still place it somewhere.
+    #:
+    #: The comparison is against a per-length expectation rather than a fixed
+    #: number of milliseconds, because duration scales with word length -- one
+    #: phone runs about 120 ms and eight phones about 780 ms on this corpus. A
+    #: flat threshold would either reject legitimately short words like ``ti``
+    #: or wave through a long word crushed to a fraction of its normal length.
+    #:
+    #: Calibrated from both sides by ``scripts/calibrate_omissions.py``, which
+    #: aligns corpus utterances against their own transcript with one extra word
+    #: spliced in -- so every inserted word is a known omission and every
+    #: original word is known-spoken. Over 1,982 spoken and 243 omitted words:
+    #:
+    #:     fraction      0.3    0.4    0.5    0.6    0.7    0.8    0.9    1.0
+    #:     false alarms 0.6%   1.1%   1.4%   2.3%   3.0%   4.6%   6.3%   9.4%
+    #:     omissions   27.6%  61.7%  78.2%  88.1%  92.2%  95.9%  97.1%  98.4%
+    #:
+    #: That table is measured on CORPUS audio, and 0.8 was briefly set from it.
+    #: It was wrong: re-measured on real learner recordings -- a different
+    #: speaker, mic and room, which the aligner fits less tightly -- words the
+    #: learner did say land closer to the floor:
+    #:
+    #:     fraction      0.5   0.6   0.7   0.8   0.9   1.0
+    #:     false MISSING   0     0     0     2     3     4   (of 14 spoken)
+    #:     omissions       2     2     2     2     2     2   (of 2)
+    #:
+    #: 0.8 bought no extra recall on learner audio and cost two false "you did
+    #: not say this" reports. Genuinely omitted words sat at ratio 0.50 while
+    #: the shortest genuinely spoken one was 0.72, so 0.6 sits mid-gap with
+    #: room on both sides -- and still lifts corpus omission recall from 78.2%
+    #: at 0.5 to 88.1%.
+    #:
+    #: The general lesson, learned twice: thresholds for judging learners must
+    #: be calibrated on learner audio, not on the corpus the model trained on.
+    min_duration_fraction: float = 0.6
+
+    def __post_init__(self) -> None:
+        total = self.text_weight + self.tone_weight
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(f"Scoring weights must sum to 1.0, got {total}")
+
+
+def _default_mfa_executable() -> str:
+    """Locate the ``mfa`` binary.
+
+    Preference order: the ``MFA_BIN`` environment variable, the project-local
+    conda environment at ``.mfa-env/`` (created by the install steps in
+    INSTALL.md), then whatever is on ``PATH``. The project-local lookup means
+    the engine works without activating a conda environment first.
+    """
+    override = os.environ.get("MFA_BIN")
+    if override:
+        return override
+
+    local = PROJECT_ROOT / ".mfa-env" / "bin" / "mfa"
+    if local.exists():
+        return str(local)
+
+    return "mfa"
+
+
+@dataclass
+class GOPConfig:
+    """Thresholds for the Goodness-of-Pronunciation check.
+
+    GOP reads the acoustic model's own per-phone log-likelihood -- the score it
+    must compute to align at all -- rather than re-deriving a judgement from
+    measured formants. It is a second, independent opinion alongside the vowel
+    classifier, and the two fail in opposite directions:
+
+    * GOP catches gross mismatch, including words the learner invented. A
+      recording of ``àbùbùtu`` against a prompt of ``àbùbùtán`` scored -4.98,
+      with one vowel at -10.6. Nothing else in the engine can flag that,
+      because ``àbùbùtu`` is not a word and cannot be looked up.
+    * GOP is blind to minimal pairs. ``ọkàn`` read against ``òkun`` scored
+      **+0.25** -- better than average. Forced alignment has already slid the
+      boundaries to maximise fit, and ``ọ`` fits ``o`` well, so the measure and
+      the aligner optimise the same quantity.
+
+    Calibrated by ``scripts/calibrate_gop.py`` on 1,627 known-correct and 198
+    known-wrong words, scoring the mean z-score across a word's phones:
+
+        threshold     -1.0   -1.5   -2.0   -2.5   -3.0
+        false alarms  4.9%   2.0%   1.1%   0.6%   0.4%
+        caught       97.0%  87.9%  75.3%  63.1%  51.5%
+
+    -1.5 is chosen over the -1.0 that maximises recall-minus-false-alarms:
+    correct words have a 5th percentile of -0.99, so -1.0 sits right on top of
+    the correct distribution and would query one word in twenty.
+
+    Note the recall figure is measured against *random* word substitutions,
+    which are usually acoustically distant. It does not transfer to minimal
+    pairs -- those are the vowel classifier's job.
+    """
+
+    #: Mean z-score below which a word is queried.
+    threshold: float = -1.5
+
+    #: The word is only judged when at least this many of its phones have
+    #: reference statistics; one scored phone is not evidence.
+    min_scored_phones: int = 2
+
+    enabled: bool = True
+
+
+@dataclass
+class MFAConfig:
+    """Locations of Montreal Forced Aligner assets.
+
+    ``acoustic_model`` points at the model produced by
+    ``notebooks/train_mfa_yoruba.ipynb``. There is no reliable off-the-shelf
+    Yoruba acoustic model, so this path will not exist until you have trained
+    one.
+    """
+
+    executable: str = field(default_factory=_default_mfa_executable)
+    acoustic_model: Path = PROJECT_ROOT / "models" / "yoruba_acoustic.zip"
+    dictionary: Path = PROJECT_ROOT / "data" / "dictionary" / "yoruba.dict"
+    num_jobs: int = field(default_factory=lambda: int(os.environ.get("MFA_JOBS", "4")))
+    beam: int = 100
+    retry_beam: int = 400
+    #: Passed to ``mfa align --single_speaker`` when the corpus is one speaker.
+    single_speaker: bool = False
+
+
+@dataclass
+class EngineConfig:
+    """Top-level configuration object threaded through the pipeline."""
+
+    corpus_dir: Path = PROJECT_ROOT / "data" / "corpus"
+    line_index: Path = PROJECT_ROOT / "data" / "corpus" / "line_index.tsv"
+    audio_dir: Path = PROJECT_ROOT / "data" / "corpus" / "wavs"
+    output_dir: Path = PROJECT_ROOT / "output"
+    audio_extensions: tuple[str, ...] = (".wav", ".flac", ".mp3", ".m4a")
+
+    gop: GOPConfig = field(default_factory=GOPConfig)
+    pitch: PitchConfig = field(default_factory=PitchConfig)
+    tone: ToneConfig = field(default_factory=ToneConfig)
+    segmental: SegmentalConfig = field(default_factory=SegmentalConfig)
+    scoring: ScoringConfig = field(default_factory=ScoringConfig)
+    mfa: MFAConfig = field(default_factory=MFAConfig)
+
+    def ensure_output_dir(self) -> Path:
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        return self.output_dir
+
+
+DEFAULT_CONFIG = EngineConfig()
