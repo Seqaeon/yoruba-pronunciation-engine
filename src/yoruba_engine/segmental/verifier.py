@@ -88,6 +88,11 @@ class SegmentalResult:
     mispronounced: list[int] = field(default_factory=list)
     measured_vowels: int = 0
 
+    #: Vowels measured but deliberately not judged, because the measurement was
+    #: too short or too uncertain to support a verdict. Reported so the caller
+    #: can say "we could not judge this" rather than implying it was fine.
+    unreliable_vowels: int = 0
+
     #: Full probability vector per measured vowel, grouped by word index and
     #: kept in speaking order. The verifier itself only reads P(expected), but
     #: :class:`~yoruba_engine.segmental.decoder.WordDecoder` needs the whole
@@ -261,7 +266,7 @@ class VowelVerifier:
             logger.info("Learned features unavailable for %s: %s", audio_path.name, exc)
             return result
 
-        entries, rows = [], []
+        entries, rows, spans = [], [], {}
         for word_index, word in enumerate(words):
             for vowel_index, vowel in enumerate(word.vowels):
                 values = self.wav2vec.measure_segment(
@@ -269,10 +274,14 @@ class VowelVerifier:
                 if values:
                     entries.append((word_index, vowel_index, vowel.label))
                     rows.append(values)
+                    spans[(word_index, vowel_index)] = vowel.end_s - vowel.start_s
         if not rows:
             return result
 
         probabilities = self.classifier.model.predict_proba(rows)
+        # The decoder needs every vowel, including the unreliable ones: it
+        # compares whole candidate words, and a missing vowel makes the
+        # sequences incomparable rather than merely noisier.
         for (word_index, _, _), distribution in zip(entries, probabilities):
             result.distributions.setdefault(word_index, []).append(distribution)
 
@@ -280,6 +289,9 @@ class VowelVerifier:
             expected = label.split("_")[0]
             position = self._label_index.get(expected)
             if position is None:
+                continue
+            if not self._is_reliable(spans[(word_index, vowel_index)], distribution):
+                result.unreliable_vowels += 1
                 continue
             best = max(range(len(distribution)), key=distribution.__getitem__)
             result.checks.append(VowelCheck(
@@ -293,6 +305,22 @@ class VowelVerifier:
         result.measured_vowels = len(entries)
         result.mispronounced = self._flag_words(result.checks, words)
         return result
+
+    def _is_reliable(self, duration_s: float, distribution) -> bool:
+        """Whether this measurement can support a verdict at all.
+
+        Two independent ways it cannot, needing two different tests. A vowel too
+        short to have been measured properly -- usually because an omitted word
+        stole its time during forced alignment -- can be confidently wrong, so
+        uncertainty says nothing about it. A vowel the model is simply unsure of
+        can be long and clean. Neither test subsumes the other.
+        """
+        import math  # noqa: PLC0415
+
+        if duration_s < self.config.min_vowel_duration_s:
+            return False
+        entropy = -sum(p * math.log(max(float(p), 1e-12)) for p in distribution)
+        return entropy <= self.config.max_vowel_entropy
 
     def _flag_words(self, checks: list[VowelCheck], words: list[WordAnalysis]) -> list[int]:
         """Decide which words to query.

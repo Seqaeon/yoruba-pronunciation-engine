@@ -168,6 +168,47 @@ class SegmentalConfig:
     #: classifier is far sharper, so the conservative setting was leaving
     #: 15 points of recall unclaimed for no benefit.
     weak_probability: float = 0.30
+
+    #: A vowel shorter than this is measured but not judged.
+    #:
+    #: Forced alignment must place every prompt word somewhere, so an omitted
+    #: word steals time from its neighbours. A final vowel that runs 170 ms when
+    #: spoken properly was squeezed to 30 ms in a recording that skipped the
+    #: preceding word, and the classifier -- reading the neighbouring consonant
+    #: instead -- returned P(expected) = 0.000 with entropy 0.10. It was
+    #: confidently wrong, so no uncertainty measure could have caught it. The
+    #: word was then reported as a vowel error when the learner's actual mistake
+    #: was tonal.
+    #:
+    #: Measured on correctly-read corpus speech, where every flag is by
+    #: definition false:
+    #:
+    #:     floor    vowels skipped   false flags removed
+    #:     20 ms         6.4%               5.4%
+    #:     30 ms         9.0%              17.6%
+    #:     40 ms        16.3%              41.9%   <- here
+    #:     50 ms        24.4%              48.6%
+    #:
+    #: 40 ms removes 2.6 times as large a share of false alarms as of vowels
+    #: generally, which is the test of whether a guard earns its cost rather
+    #: than simply judging less.
+    min_vowel_duration_s: float = 0.040
+
+    #: Entropy of the vowel distribution above which the vowel is not judged.
+    #:
+    #: Catches the opposite failure: the model spreading probability because the
+    #: audio is genuinely ambiguous. A learner's ``ọkun`` read as
+    #: 0.46/0.15/0.15/0.12 is the classifier saying it cannot tell, and a
+    #: probability floor cannot see that -- 0.46 clears any sane threshold.
+    #:
+    #:     ceiling  vowels skipped   false flags removed
+    #:       2.0         0.1%               2.7%
+    #:       1.5         1.5%              21.6%   <- here
+    #:       1.0         6.4%              37.8%
+    #:
+    #: 1.5 removes fourteen times as large a share of false alarms as of vowels
+    #: overall, which makes it the cheapest guard in the engine.
+    max_vowel_entropy: float = 1.5
     min_weak_vowels: int = 2
 
 
