@@ -21,6 +21,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -52,6 +54,30 @@ def verify(path: Path, expected: dict) -> str:
     if digest(path) != expected["sha256"]:
         return "wrong-hash"
     return "ok"
+
+
+def download_with_gh(repo: str, tag: str, destination: Path) -> bool:
+    """Fetch a release asset through the GitHub CLI.
+
+    Release assets on a **private** repository are not reachable over anonymous
+    HTTP -- the download URL returns 404 rather than 401, which is why this is
+    tried first rather than as a fallback. ``gh`` carries the user's existing
+    credentials, so it works for private and public alike.
+
+    Returns whether the asset was written.
+    """
+    if shutil.which("gh") is None:
+        return False
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ["gh", "release", "download", tag, "--repo", repo,
+         "--pattern", destination.name, "--dir", str(destination.parent), "--clobber"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"    gh: {(result.stderr or result.stdout).strip()[:160]}")
+        return False
+    return destination.exists()
 
 
 def download(url: str, destination: Path) -> None:
@@ -93,12 +119,16 @@ def main() -> int:
         path = PROJECT_ROOT / relative
         state = verify(path, expected)
         if state != "ok" and not args.check:
-            url = base + Path(relative).name
-            print(f"{relative:<40}{state:<13}fetching from {url}")
-            try:
-                download(url, path)
-            except (urllib.error.URLError, urllib.error.HTTPError) as exc:
-                print(f"  ! download failed: {exc}")
+            print(f"{relative:<40}{state:<13}fetching")
+            fetched = download_with_gh(args.repo, tag, path)
+            if not fetched:
+                url = base + Path(relative).name
+                try:
+                    download(url, path)
+                    fetched = True
+                except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+                    print(f"  ! {url}\n    {exc}")
+            if not fetched:
                 statuses[relative] = state
                 continue
             state = verify(path, expected)
@@ -126,8 +156,9 @@ def main() -> int:
         if args.check:
             print("\nRun without --check to download them.")
         else:
-            print(f"\nIf the release is not published yet, attach these files to "
-                  f"tag {tag} on {args.repo}, or pass --base-url.")
+            print(f"\nIf the release is not published, attach these files to tag "
+                  f"{tag} on {args.repo}.\n"
+                  "If the repository is private, authenticate first:  gh auth login")
         return 1
 
     print("\nAll artifacts present and verified.")

@@ -39,41 +39,117 @@ Tone mismatch on first vowel.
 
 ## Current state
 
-MFA 3.4.1 is installed in `.mfa-env/`, the engine is installed editable into
-`/home/seqaeon/Downloads/venv`, and the corpus is staged. Everything up to
-training runs; the acoustic model has not been trained yet.
+Trained and running end to end. The acoustic model, tone classifier and vowel
+classifier all exist and are calibrated against each other.
 
 | | |
 |---|---|
-| Corpus | 3,583 utterances, 4.03 h, 36 speakers |
-| Tone-mark coverage | 100% |
-| Dictionary | 3,413 entries, 62 phones, 0 G2P failures |
-| Acoustic model | trained; 99.5% of utterances aligned |
-| Tone detection | 74.7% held out, speaker-disjoint (chance 36.8%) |
-| Tests | 121 passing |
+| Acoustic model | **37.9 h**, 106,441 utterances, 2,047 speaker groups |
+| Sources | michsethowusu 24.0 h, WaxalNLP 6.3 h, Yoruba-TTS 4.2 h, SLR86 3.5 h |
+| Alignment | **99.65%** of training utterances; **100%** of the 3,583-utterance local corpus |
+| Dictionary | 9,092 entries, 31 phones, 0 G2P failures |
+| Studio corpus (classifier) | +5,464 utterances, 7.26 h, 141 speakers (IroyinSpeech, LJSpeech, CV) |
+| Tone detection | **73.0%** held out, speaker-disjoint (chance 38.1%) |
+| Vowel identity | **59.5%** / macro F1 0.432 on 44 held-out **studio** speakers |
+| Omission detection | **95.9%** caught at 4.6% false alarms |
+| Substitution (GOP) | **87.9%** caught at 2.0% false alarms |
+| Tests | 146 passing |
+
+Two notes on reading these numbers, both learned the hard way:
+
+**The vowel figure is deliberately unflattering.** Earlier versions of this table
+reported 73%, measured on a held-out set that pooled studio and crowdsourced
+speakers. Because 94.5% of training audio is crowdsourced, those held-out
+speakers were the same domain as training and inflated everything — the `un`/`an`
+contrast read 92.9% pooled and **69.7%** on studio speech alone. Learners record
+in studio-ish conditions, so studio-only is the only honest number.
+
+**Thresholds are calibrated on learner audio, not corpus audio.** The omission
+threshold was briefly set from corpus speech and produced false "you did not say
+this" reports on real attempts, because the aligner fits an unfamiliar voice
+less tightly. See `scripts/calibrate_omissions.py`.
 
 ## Quick start
 
 ```bash
-# Install: see INSTALL.md (MFA needs conda; the engine is a plain pip install)
+# 1. Install (see "Installation" below, or INSTALL.md for detail)
+micromamba create -y -p .mfa-env -c conda-forge \
+    python=3.11 montreal-forced-aligner "kaldi=*=cpu*"
+pip install -e . -r requirements.txt
 
-# 1. Stage the downloaded datasets into data/corpus/
-python scripts/prepare_dataset.py
+# 2. Fetch the trained artifacts (64 MB, verified against models/MANIFEST.json)
+python scripts/fetch_models.py
 
-# 2. Audit
-python -m yoruba_engine.cli audit
+# 3. Check everything resolved
+python -m yoruba_engine.cli health
 
-# 3. Build the pronunciation dictionary
-python -m yoruba_engine.cli dictionary
-
-# 4. Train the acoustic model (one-time, 1-2 h, CPU only)
-jupyter notebook notebooks/train_mfa_yoruba.ipynb
-
-# 5. Assess a recording
+# 4. Assess a recording
 python -m yoruba_engine.cli assess \
-    --reference data/corpus/wavs/yof_00295_00318039388.wav \
+    --reference data/corpus/wavs/yof_00295_00099759266.wav \
     --learner uploads/learner.wav \
-    --text "òrí"
+    --text "Àbùbùtán bíi omi òkun."
+```
+
+## Installation
+
+Full detail and troubleshooting live in [INSTALL.md](INSTALL.md). The short
+version, and the three things that actually go wrong:
+
+### 1. Montreal Forced Aligner (conda only)
+
+```bash
+micromamba create -y -p .mfa-env -c conda-forge \
+    python=3.11 montreal-forced-aligner=3.4.1 "kaldi=*=cpu*"
+```
+
+MFA is on PyPI but **`kalpy`, its Kaldi binding, is not** — and the engine shells
+out to Kaldi executables (`gmm-align-compiled`, `fstcompile`,
+`compute-mfcc-feats`) that pip cannot provide. There is no `requirements.txt`
+route to a working aligner.
+
+`"kaldi=*=cpu*"` is not optional. Without the pin, conda resolves per machine: a
+box with CUDA gets a GPU build whose binaries link `libcuda.so.1` from the NVIDIA
+*driver*, so they will not even load on a CPU-only server. The CPU build is also
+~1.4 GB against ~5.5 GB for the CUDA one.
+
+### 2. The engine itself
+
+```bash
+python -m venv venv && source venv/bin/activate
+pip install -e . -r requirements.txt
+```
+
+Plain pip. `praat-parselmouth`, `scikit-learn`, `soundfile`, `numpy`, `joblib`.
+
+### 3. Trained artifacts
+
+```bash
+python scripts/fetch_models.py          # download and verify
+python scripts/fetch_models.py --check  # verify only
+```
+
+64 MB of model files are too large for git and live on a GitHub Release.
+`models/MANIFEST.json` carries their sha256 sums. If the repository is private,
+run `gh auth login` first — the fetcher uses `gh` because private release assets
+return 404 over anonymous HTTP.
+
+**Why the dictionary is committed but the models are not:** MFA does not report a
+phone-set mismatch. Align a dictionary whose phones differ from the model's and
+it exits zero, writing TextGrids in which every segment carries the same
+meaningless label. The dictionary is 342 KB, so it ships with the code and the
+fetcher refuses to proceed if its checksum has changed.
+
+### Retraining changes the calibration
+
+`models/gop_reference.json`, `models/word_duration_stats.json` and
+`models/word_frequency.json` are measurements of **this** acoustic model. Train
+your own and they are silently wrong — no error, just worse feedback. Regenerate:
+
+```bash
+python scripts/measure_alignment_stats.py     # duration thresholds
+python scripts/build_gop_reference.py         # per-phone likelihood means
+python scripts/train_tone_classifier.py       # tone, on the new boundaries
+python scripts/build_word_frequency.py        # decoder prior
 ```
 
 ## The datasets
@@ -268,7 +344,7 @@ normalized per speaker):
 | Majority class | 36.8% |
 | Threshold rules | 63.7% |
 | Logistic regression | 64.3% |
-| **Gradient boosting (shipped)** | **74.7%** |
+| **Gradient boosting (shipped)** | **73.0%** |
 
 Per-tone recall for the shipped model: High 80%, Mid 74%, Low 68%.
 
