@@ -221,8 +221,23 @@ def staged_transcripts(root: Path) -> set[str]:
     return seen
 
 
+def utterance_phones(text: str) -> set[str]:
+    """The distinct vowel phones a transcript would produce, or an empty set."""
+    from yoruba_engine.exceptions import G2PError  # noqa: PLC0415
+    from yoruba_engine.g2p.dictionary import grapheme_to_phonemes  # noqa: PLC0415
+
+    found = set()
+    for word in text.split():
+        try:
+            symbols = [p.symbol for p in grapheme_to_phonemes(normalize(word))]
+        except (G2PError, Exception):  # noqa: B014
+            continue
+        found.update(s.split("_")[0] for s in symbols)
+    return found
+
+
 def ingest_parquet(stager: Stager, paths: list[Path], source: str,
-                   limit: int = 0) -> None:
+                   limit: int = 0, prefer: set[str] | None = None) -> None:
     """Read HuggingFace parquet shards into the corpus.
 
     ``limit`` caps how many utterances this source may contribute, spread as an
@@ -231,14 +246,23 @@ def ingest_parquet(stager: Stager, paths: list[Path], source: str,
     whole it would be 96% of the corpus by utterance count and teach the
     acoustic model almost nothing but context-free fragments. The quota keeps
     the sample spread across all 50 shards instead of exhausting the first few.
+
+    ``prefer`` restricts the pass to utterances containing one of the named
+    vowel phones, and ignores ``limit``. The corpus is not short of vowels in
+    general but of one in particular: ``ẹn`` occurs 45 times against ``ọn``'s
+    3,246, which is why it scored 0.009 F1 and looked unlearnable. It is rare in
+    the language rather than in our sampling -- it appears in 0.04% of
+    michsethowusu too -- so the only way to raise it is to read every shard and
+    keep the few hundred utterances that contain it. Selecting on the text
+    column first means audio is decoded only for rows that qualify.
     """
     import pyarrow.parquet as pq  # noqa: PLC0415
 
-    quota = (limit // max(len(paths), 1)) if limit else 0
+    quota = 0 if prefer else ((limit // max(len(paths), 1)) if limit else 0)
     for path in paths:
         if not path.exists():
             continue
-        if limit and stager.kept[source] >= limit:
+        if limit and not prefer and stager.kept[source] >= limit:
             break
         target = stager.kept[source] + quota if quota else 0
         parquet = pq.ParquetFile(path)
@@ -251,6 +275,8 @@ def ingest_parquet(stager: Stager, paths: list[Path], source: str,
                 break
             for row, (text, audio) in enumerate(zip(texts, audios)):
                 if not audio or not audio.get("bytes"):
+                    continue
+                if prefer and not (utterance_phones(str(text)) & prefer):
                     continue
                 speaker = str(speakers[row]) if speakers else None
                 stager.add(source, speaker,
@@ -292,6 +318,9 @@ def main() -> int:
                         metavar="N",
                         help="cap on michsethowusu utterances (default 120,000, "
                              "about 28 h; the full set is 216 h of fragments)")
+    parser.add_argument("--prefer-vowels", nargs="*", metavar="PHONE",
+                        help="keep only utterances containing these vowel "
+                             "phones, e.g. --prefer-vowels En. Overrides the cap.")
     parser.add_argument("--only", nargs="*", metavar="SOURCE",
                         help="ingest only these sources (default: all)")
     args = parser.parse_args()
@@ -341,7 +370,8 @@ def main() -> int:
             stager,
             sorted(args.data.glob("michsethowusu/data/train-*-of-00050-*.parquet"))
             or sorted(args.data.glob("train-*-of-00050-*.parquet")),
-            "michsethowusu", limit=args.max_michsethowusu))
+            "michsethowusu", limit=args.max_michsethowusu,
+            prefer=set(args.prefer_vowels) if args.prefer_vowels else None))
 
     # Long read sentences at 48 kHz, downsampled on ingest. Only 58.4% of its
     # lines carry a tone mark, and at ~10 seconds an utterance with no mark
