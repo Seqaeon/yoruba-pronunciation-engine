@@ -121,24 +121,41 @@ where the studio-domain gap mattered, while these feed the *aligner*. Per
 
 <https://huggingface.co/datasets/michsethowusu/yoruba-speech-text-parallel>
 
-99,550 utterances - 24.0 h - the largest single contributor to the aligner
+**1,647,022 rows across 50 shards - 216 hours** - capped at 120,000 utterances
 
-One- and two-word fragments averaging under a second (`ti kó`, `yóò sì`,
-`ọmọ`), 16 kHz, 85.8% tone-marked. Too short to teach prosody or context, but
-that volume of clean fragments is good phone coverage. Only shard 1 of 50
-(32,941 rows) is held locally.
+One- and two-word fragments (`ti kó`, `yóò sì`, `ọmọ`) at 16 kHz, 85.8%
+tone-marked, with a **median duration of 0.26 s** -- roughly one syllable each.
+
+The full set is 20x what the shipped model used and would be about 96% of the
+combined corpus by utterance count. An acoustic model trained mostly on
+context-free fragments loses what triphone and silence modelling depend on, so
+ingestion caps it at 120,000, drawn as an equal quota from each of the 50 shards
+rather than from the front. That is near the 99,550 the shipped model used,
+which reached a healthy 97.3 ms mean vowel on its holdout.
+
+Its median is also why `MIN_DURATION_S` is 0.20 s rather than 0.30 s: the higher
+floor rejected more than half of it.
 
 ### google/WaxalNLP
 
 <https://huggingface.co/datasets/google/WaxalNLP>
 
-2,202 utterances - 6.30 h
+2,611 rows - 2,108 unique transcripts - **93.4% tone-marked**
 
-Long read sentences, ~10 s each, at 48 kHz. Only **58.4% of lines carry a tone
-mark**, and at that length an utterance with no mark anywhere is genuinely
-undiacritized rather than legitimately all-mid. The shipped model was trained
-with `require_tone_marks` disabled and so learned from the unmarked 42%; the
-local ingest enforces the filter, which costs about that share of it.
+Long read sentences at 48 kHz, downsampled on ingest, with a median duration of
+16.9 s. 1,487 utterances and 5.83 h reach the local corpus.
+
+(**Correction.** This file previously reported Waxal as 58.4% tone-marked and
+therefore 42% undiacritized. That figure came from `yor-train-00001` alone,
+which is the worst of its eleven shards at 32%; every other shard runs 99-100%.
+Waxal is clean, and the tone-mark filter drops only 173 lines.)
+
+The subset shipped as `yor_tts-*` duplicates `yor-*` exactly -- 2,108 unique
+transcripts in each, 2,108 shared -- so only `yor-*` is ingested.
+
+Its duration profile is why `MAX_DURATION_S` moved from 15 s to 30 s: the old
+ceiling took 42% of Waxal and discarded precisely the long, context-rich
+sentences that offset michsethowusu's fragments.
 
 ### Local TTS
 

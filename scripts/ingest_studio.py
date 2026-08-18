@@ -49,7 +49,19 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from yoruba_engine.config import EngineConfig  # noqa: E402
 from yoruba_engine.g2p.orthography import normalize, tokenize  # noqa: E402
 
-MIN_DURATION_S, MAX_DURATION_S = 0.30, 15.0
+#: Duration bounds for an accepted utterance.
+#:
+#: The floor is 0.20 s because michsethowusu is one- and two-word fragments with
+#: a median of 0.26 s -- a 0.30 s floor rejected more than half of it. These are
+#: about one syllable each and carry no context, so they earn their place on
+#: phone coverage rather than on prosody.
+#:
+#: The ceiling is 30 s because Waxal's median utterance is 16.9 s, so a 15 s
+#: ceiling took only 42% of it and threw away precisely the long, context-rich
+#: read sentences that balance michsethowusu's fragments. 30 s keeps 76% of
+#: Waxal and stays inside what MFA aligns comfortably; its longest clip is 580 s
+#: and is still excluded.
+MIN_DURATION_S, MAX_DURATION_S = 0.20, 30.0
 TARGET_RATE = 16000
 #: Clips with no speaker label are grouped this many to a pseudo-speaker, so
 #: MFA's speaker-adaptive stage has something to estimate a transform from.
@@ -209,18 +221,34 @@ def staged_transcripts(root: Path) -> set[str]:
     return seen
 
 
-def ingest_parquet(stager: Stager, paths: list[Path], source: str) -> None:
+def ingest_parquet(stager: Stager, paths: list[Path], source: str,
+                   limit: int = 0) -> None:
+    """Read HuggingFace parquet shards into the corpus.
+
+    ``limit`` caps how many utterances this source may contribute, spread as an
+    equal quota per shard rather than taken from the front. michsethowusu is
+    1,647,022 fragments totalling 216 hours at a median of 0.26 seconds; taken
+    whole it would be 96% of the corpus by utterance count and teach the
+    acoustic model almost nothing but context-free fragments. The quota keeps
+    the sample spread across all 50 shards instead of exhausting the first few.
+    """
     import pyarrow.parquet as pq  # noqa: PLC0415
 
+    quota = (limit // max(len(paths), 1)) if limit else 0
     for path in paths:
         if not path.exists():
             continue
+        if limit and stager.kept[source] >= limit:
+            break
+        target = stager.kept[source] + quota if quota else 0
         parquet = pq.ParquetFile(path)
         for batch_index, batch in enumerate(parquet.iter_batches(batch_size=256)):
             data = batch.to_pydict()
             texts = data.get("sentence") or data.get("text") or []
             audios = data.get("audio") or []
             speakers = data.get("speaker_id") or data.get("client_id")
+            if target and stager.kept[source] >= target:
+                break
             for row, (text, audio) in enumerate(zip(texts, audios)):
                 if not audio or not audio.get("bytes"):
                     continue
@@ -260,6 +288,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--out", type=Path, default=PROJECT_ROOT / "data" / "studio_corpus")
     parser.add_argument("--data", type=Path, default=PROJECT_ROOT / "data")
+    parser.add_argument("--max-michsethowusu", type=int, default=120_000,
+                        metavar="N",
+                        help="cap on michsethowusu utterances (default 120,000, "
+                             "about 28 h; the full set is 216 h of fragments)")
     parser.add_argument("--only", nargs="*", metavar="SOURCE",
                         help="ingest only these sources (default: all)")
     args = parser.parse_args()
@@ -306,8 +338,10 @@ def main() -> int:
     # coverage rather than on prosody.
     run("michsethowusu", "michsethowusu yoruba-speech-text-parallel",
         lambda: ingest_parquet(
-            stager, sorted(args.data.glob("train-*-of-00050-*.parquet")),
-            "michsethowusu"))
+            stager,
+            sorted(args.data.glob("michsethowusu/data/train-*-of-00050-*.parquet"))
+            or sorted(args.data.glob("train-*-of-00050-*.parquet")),
+            "michsethowusu", limit=args.max_michsethowusu))
 
     # Long read sentences at 48 kHz, downsampled on ingest. Only 58.4% of its
     # lines carry a tone mark, and at ~10 seconds an utterance with no mark
@@ -316,7 +350,10 @@ def main() -> int:
     # trained with that filter disabled and so learned from the unmarked lines.
     run("waxal", "google WaxalNLP",
         lambda: ingest_parquet(
-            stager, sorted(args.data.glob("yor-train-*.parquet")), "waxal"))
+            stager,
+            sorted(args.data.glob("WAXAL/yor-*.parquet"))
+            or sorted(args.data.glob("yor-train-*.parquet")),
+            "waxal"))
 
     run("thisniyi", "thisniyi cv_and_openslr",
         lambda: ingest_parquet(
