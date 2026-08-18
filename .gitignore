@@ -74,3 +74,6 @@ models/**/*.bin
 # live in tests/attempts/ and are themselves ignored.
 /my_attempt*.wav
 *_16k.wav
+data/YECS_Corpus/
+data/yecs_corpus/
+output/yecs_aligned/
