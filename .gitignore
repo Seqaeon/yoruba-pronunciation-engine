@@ -77,3 +77,8 @@ models/**/*.bin
 data/YECS_Corpus/
 data/yecs_corpus/
 output/yecs_aligned/
+data/train_corpus/
+output/train_aligned/
+output/mfa_train_tmp/
+models/yoruba_acoustic_v2.zip
+data/dictionary/train.dict
