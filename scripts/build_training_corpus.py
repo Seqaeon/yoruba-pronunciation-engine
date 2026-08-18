@@ -1,10 +1,11 @@
 """Combine the staged corpora into one MFA training corpus.
 
-The acoustic model currently ships trained on SLR86 alone -- 3,583 utterances,
-4.0 hours, which is thin enough that the model fails on speech unlike it. One
-pass over YECS with that model left 62% of the audio unlabelled and put the
-median vowel at 30 ms against 80 ms on SLR86, which is a statement about the
-model's coverage rather than about YECS.
+The shipped acoustic model was trained on 37.93 hours from 2,047 speakers
+(michsethowusu, Waxal, local TTS, OpenSLR), but with the tone-mark filter
+disabled, so undiacritized lines taught it to conflate ``ọ`` with ``o``. One
+pass over YECS with it left 62% of the audio unlabelled and put the median
+vowel at 30 ms against 80 ms on SLR86, so its coverage does not reach this
+speech. Every corpus combined here requires diacritics.
 
 Training reads every corpus at once. Real directories hold symlinked files
 rather than the directories themselves being symlinks: neither ``Path.rglob``

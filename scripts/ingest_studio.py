@@ -300,6 +300,24 @@ def main() -> int:
         lambda: ingest_parquet(
             stager, [args.data / "train-00000-of-00001.parquet"], "ljspeech"))
 
+    # One- and two-word fragments averaging under a second. Low context for
+    # triphone modelling, but 24 hours of it are in the shipped acoustic model
+    # and 85.8% of its lines are tone-marked, so it earns its place on phone
+    # coverage rather than on prosody.
+    run("michsethowusu", "michsethowusu yoruba-speech-text-parallel",
+        lambda: ingest_parquet(
+            stager, sorted(args.data.glob("train-*-of-00050-*.parquet")),
+            "michsethowusu"))
+
+    # Long read sentences at 48 kHz, downsampled on ingest. Only 58.4% of its
+    # lines carry a tone mark, and at ~10 seconds an utterance with no mark
+    # anywhere is genuinely undiacritized rather than legitimately all-mid, so
+    # the tone-mark filter drops roughly 42% of it. The shipped model was
+    # trained with that filter disabled and so learned from the unmarked lines.
+    run("waxal", "google WaxalNLP",
+        lambda: ingest_parquet(
+            stager, sorted(args.data.glob("yor-train-*.parquet")), "waxal"))
+
     run("thisniyi", "thisniyi cv_and_openslr",
         lambda: ingest_parquet(
             stager, sorted(args.data.glob("thisniyi_*.parquet")), "thisniyi"))

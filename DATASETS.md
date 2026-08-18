@@ -104,8 +104,46 @@ Available at
 <https://mozilladatacollective.com/datasets/cmo1nlaah0071mk077mw0qhpv>; there is
 an ingestion path in `scripts/prepare_dataset.py` that is deliberately not run.
 
-**google/WaxalNLP** and **michsethowusu/yoruba-speech-text-parallel** were
-evaluated during the dataset search and not ingested.
+(**Correction.** An earlier version of this file listed google/WaxalNLP and
+michsethowusu/yoruba-speech-text-parallel here as evaluated and not ingested.
+That was wrong -- see below. Both are in the shipped acoustic model and are the
+bulk of it.)
+
+## In the shipped acoustic model
+
+These were trained on Kaggle and are not in the local `studio_corpus`, which is
+why they are easy to overlook: `studio_corpus` feeds the *vowel classifier*,
+where the studio-domain gap mattered, while these feed the *aligner*. Per
+`models/yoruba_acoustic.manifest.json`, the shipped model is 37.93 hours over
+2,047 speakers.
+
+### michsethowusu/yoruba-speech-text-parallel
+
+<https://huggingface.co/datasets/michsethowusu/yoruba-speech-text-parallel>
+
+99,550 utterances - 24.0 h - the largest single contributor to the aligner
+
+One- and two-word fragments averaging under a second (`ti kó`, `yóò sì`,
+`ọmọ`), 16 kHz, 85.8% tone-marked. Too short to teach prosody or context, but
+that volume of clean fragments is good phone coverage. Only shard 1 of 50
+(32,941 rows) is held locally.
+
+### google/WaxalNLP
+
+<https://huggingface.co/datasets/google/WaxalNLP>
+
+2,202 utterances - 6.30 h
+
+Long read sentences, ~10 s each, at 48 kHz. Only **58.4% of lines carry a tone
+mark**, and at that length an utterance with no mark anywhere is genuinely
+undiacritized rather than legitimately all-mid. The shipped model was trained
+with `require_tone_marks` disabled and so learned from the unmarked 42%; the
+local ingest enforces the filter, which costs about that share of it.
+
+### Local TTS
+
+1,606 utterances - 4.16 h, staged on Kaggle from the same recording-tool
+exports as `Yoruba-TTS-Dataset`.
 
 ## Worth pursuing
 

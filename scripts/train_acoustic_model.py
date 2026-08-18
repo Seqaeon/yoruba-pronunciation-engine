@@ -1,10 +1,13 @@
 """Train a Yoruba acoustic model on every staged corpus.
 
-The shipped model was trained on SLR86 alone: 3,583 utterances, 4.0 hours, 36
-speakers. That is thin enough that it fails on speech unlike its training set.
+The shipped model was trained on Kaggle over 37.93 hours from 2,047 speakers:
+michsethowusu (24.0 h), Waxal (6.30 h), local TTS (4.16 h) and OpenSLR (3.47 h).
+Its weakness is not volume but admission policy -- it was built with
+``require_tone_marks`` disabled, so it learned from Waxal's 42% undiacritized
+lines, which teaches the model that ``ọ`` and ``o`` are the same vowel.
+
 Aligning YECS with it left 62% of the audio unlabelled and put the median vowel
-at 30 ms against 80 ms on SLR86 -- a statement about the model's coverage, not
-about YECS.
+at 30 ms against 80 ms on SLR86, so its coverage does not extend to this speech.
 
 Training does not use the old model. MFA starts flat, initialising monophones
 from the audio itself and iterating align/re-estimate through triphone,
