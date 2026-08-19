@@ -82,3 +82,10 @@ output/train_aligned/
 output/mfa_train_tmp/
 models/yoruba_acoustic_v2.zip
 data/dictionary/train.dict
+2607.18317v2.pdf
+models/*.v1.json
+models/*.v1.zip
+models/train.dict
+models/w2v_layer16_v2.npz
+output/aligned_v2/
+output/slr86_new/
