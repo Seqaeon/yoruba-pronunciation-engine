@@ -1,21 +1,21 @@
 {
   "schema": 1,
-  "release_tag": "v0.2.0",
+  "release_tag": "v0.3.0",
   "note": "Artifacts too large for git. Fetch with scripts/fetch_models.py. The calibration files committed in models/ (gop_reference.json, word_duration_stats.json) are measurements of THIS acoustic model's behaviour and are wrong for any other -- see acoustic_model_sha256. vowel_classifier.joblib additionally requires the wav2vec2 checkpoint; without it the engine disables vowel-identity checking rather than failing.",
   "artifacts": {
     "models/yoruba_acoustic.zip": {
-      "bytes": 61607567,
-      "sha256": "29b8a87b1aee99eb958220eca61367edfb92beb5f959b3d10095a37c9aa93e27",
-      "purpose": "MFA acoustic model. Everything else is calibrated against it."
+      "bytes": 92233028,
+      "sha256": "92d13ef28b73319ae1c1ed2373832f7c66d6348fd10d12f7549edb2ec5f94f96",
+      "purpose": "MFA acoustic model, trained on 193,309 utterances from 2,801 speakers (~118 h: SLR86, studio corpus, YECS). Everything else is calibrated against it."
     },
     "models/vowel_classifier.joblib": {
-      "bytes": 5505216,
-      "sha256": "e9a5a453d2a8868fed600810035ebc059590ecac14ac3d4f1684d4ca6287cc40",
-      "purpose": "Vowel identity classifier. Needs the wav2vec2 checkpoint at models/lyngual-yoruba (1.26 GB, fetched separately per INSTALL.md) -- it consumes learned features, not measurements."
+      "bytes": 10690367,
+      "sha256": "31256859c3a40639fdf7f7f826eb3cae41aba4af2e45c4418ac0ec94ddb3bd58",
+      "purpose": "Vowel identity classifier, 555,013 vowels from 2,800 speakers. Needs the wav2vec2 checkpoint at models/lyngual-yoruba (1.26 GB, fetched separately per INSTALL.md) -- it consumes learned features, not measurements."
     },
     "models/tone_classifier.joblib": {
-      "bytes": 1835808,
-      "sha256": "75142e046836ac3bb2574899afa5b49d1b77d033e8d95616d8e75ae7dc003128",
+      "bytes": 2567144,
+      "sha256": "b00861db9b5a657023dcff24c8404055f1573c292665033215e4cb49b54c51e9",
       "purpose": "Tone classifier, trained on this aligner's boundaries."
     },
     "models/lyngual-yoruba/model.safetensors": {
@@ -24,7 +24,7 @@
       "purpose": "wav2vec2 checkpoint the vowel classifier reads its features from (LyngualLabs/mms-300m-yoruba-english, layer 16). Without it the engine disables vowel-identity checking."
     }
   },
-  "acoustic_model_sha256": "29b8a87b1aee99eb958220eca61367edfb92beb5f959b3d10095a37c9aa93e27",
+  "acoustic_model_sha256": "92d13ef28b73319ae1c1ed2373832f7c66d6348fd10d12f7549edb2ec5f94f96",
   "calibrated_against": {
     "dictionary_sha256": "29bfa5ea824038b61b3795767cecbb2697979a25ad5e7b1850ae2009f53ce6f9",
     "committed_calibration": [
@@ -38,10 +38,47 @@
     "feature_dims": 1024,
     "wav2vec_model": "LyngualLabs/mms-300m-yoruba-english",
     "wav2vec_layer": 16,
-    "training_vowels": 131360,
-    "holdout_accuracy": 0.8731,
-    "macro_f1": 0.8112,
-    "holdout_domain": "studio only (SLR86 + IroyinSpeech)"
+    "training_vowels": 555013,
+    "holdout_accuracy": 0.8953,
+    "macro_f1": 0.8343,
+    "holdout_domain": "studio only (SLR86 + IroyinSpeech)",
+    "speakers": 2800,
+    "holdout_vowels": 26270,
+    "previous": {
+      "training_vowels": 131360,
+      "speakers": 169,
+      "holdout_accuracy": 0.8731,
+      "macro_f1": 0.8112
+    },
+    "caveat": "En has 26 held-out examples; its F1 is not a number to act on. The weakest measurable class is in at 0.695."
   },
-  "repository": "Seqaeon/yoruba-pronunciation-engine"
+  "repository": "Seqaeon/yoruba-pronunciation-engine",
+  "acoustic_model": {
+    "utterances": 193309,
+    "speakers": 2801,
+    "hours_approx": 118,
+    "corpora": [
+      "OpenSLR SLR86",
+      "studio corpus (michsethowusu, Waxal, IroyinSpeech, Common Voice 26.0, ljspeech, thisniyi)",
+      "YECS (>=50% Yoruba by word)"
+    ],
+    "all_lines_diacritized": true,
+    "aligned": 193007,
+    "alignment_rate": 0.998,
+    "phones": 33,
+    "tone_in_phones": false,
+    "vowels_under_40ms_slr86": 0.053,
+    "previous_model": {
+      "hours": 37.93,
+      "speakers": 2047,
+      "vowels_under_40ms_slr86": 0.151,
+      "require_tone_marks": false
+    }
+  },
+  "tone_classifier": {
+    "kind": "gbm",
+    "training_vowels": 49531,
+    "holdout_accuracy": 0.759,
+    "previous_holdout_accuracy": 0.7304
+  }
 }

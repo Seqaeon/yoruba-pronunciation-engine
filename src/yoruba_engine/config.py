@@ -172,27 +172,35 @@ class SegmentalConfig:
     #: A vowel shorter than this is measured but not judged.
     #:
     #: Forced alignment must place every prompt word somewhere, so an omitted
-    #: word steals time from its neighbours. A final vowel that runs 170 ms when
-    #: spoken properly was squeezed to 30 ms in a recording that skipped the
-    #: preceding word, and the classifier -- reading the neighbouring consonant
-    #: instead -- returned P(expected) = 0.000 with entropy 0.10. It was
-    #: confidently wrong, so no uncertainty measure could have caught it. The
-    #: word was then reported as a vowel error when the learner's actual mistake
-    #: was tonal.
+    #: word steals time from its neighbours, and a squeezed span used to be read
+    #: confidently and wrongly. Under the 37.9 h acoustic model a 30 ms final
+    #: vowel returned P(expected) = 0.000 with entropy 0.10 -- confidently wrong,
+    #: so no uncertainty measure could catch it -- and 15.1% of correctly-read
+    #: SLR86 vowels landed under 40 ms.
     #:
-    #: Measured on correctly-read corpus speech, where every flag is by
-    #: definition false:
+    #: The 118 h model changed what a short span means. Only 5.3% of SLR86
+    #: vowels now fall under 40 ms, and where they do the classifier is right:
     #:
-    #:     floor    vowels skipped   false flags removed
-    #:     20 ms         6.4%               5.4%
-    #:     30 ms         9.0%              17.6%
-    #:     40 ms        16.3%              41.9%   <- here
-    #:     50 ms        24.4%              48.6%
+    #:     duration      n   median P(expected)   below 0.20
+    #:      0-30 ms    113        0.969              7.1%
+    #:     30-50 ms    850        0.976              3.5%
+    #:      50+ ms   4,638        0.987              1.8%
     #:
-    #: 40 ms removes 2.6 times as large a share of false alarms as of vowels
-    #: generally, which is the test of whether a guard earns its cost rather
-    #: than simply judging less.
-    min_vowel_duration_s: float = 0.040
+    #: A short vowel is now usually a genuinely short vowel rather than a
+    #: mis-segmented one, so the floor exists to skip far less:
+    #:
+    #:     floor    vowels skipped   false flags removed   ratio
+    #:     20 ms          0.4%              0.9%            2.3
+    #:     30 ms          2.0%              6.8%            3.4   <- here
+    #:     40 ms          6.8%             20.5%            3.0
+    #:     50 ms         17.2%             32.5%            1.9
+    #:
+    #: 30 ms both earns its cost best and skips a third as many vowels as 40 ms
+    #: did. That matters because the guard was silencing real errors: a learner
+    #: who said ``àbùbùtu`` for ``àbùbùtán`` produced a 30 ms final vowel that
+    #: the classifier read correctly as ``u``, and the 40 ms floor threw that
+    #: verdict away, leaving GOP to catch the word by a different route.
+    min_vowel_duration_s: float = 0.030
 
     #: Entropy of the vowel distribution above which the vowel is not judged.
     #:
@@ -274,7 +282,29 @@ class ScoringConfig:
     #:
     #: The general lesson, learned twice: thresholds for judging learners must
     #: be calibrated on learner audio, not on the corpus the model trained on.
-    min_duration_fraction: float = 0.6
+    #: A word aligned to less than this share of its expected duration is
+    #: reported as unspoken.
+    #:
+    #: Recalibrated against the 118 h acoustic model by splicing one unspoken
+    #: word into 250 utterances, giving 2,034 known-spoken and 249 known-omitted
+    #: words:
+    #:
+    #:     fraction   false alarms   omissions caught
+    #:        0.5         1.9%            57.8%
+    #:        0.6         5.8%            73.1%
+    #:        0.7         7.2%            83.9%   <- here
+    #:        0.8         9.2%            88.0%
+    #:        0.9        11.5%            92.8%
+    #:
+    #: The calibration script recommends 0.9, maximising recall minus false
+    #: alarms with the two weighted equally. They are not equal here. A missed
+    #: omission means a learner is not told they skipped a word; a false alarm
+    #: means being told they skipped a word they actually said, which is the
+    #: error that makes a report untrustworthy rather than merely incomplete.
+    #:
+    #: 0.7 takes the steepest part of the curve -- 10.8 points of recall for 1.4
+    #: points of false alarms over 0.6 -- and stops before the trade flattens.
+    min_duration_fraction: float = 0.7
 
     def __post_init__(self) -> None:
         total = self.text_weight + self.tone_weight

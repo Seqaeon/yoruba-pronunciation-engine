@@ -44,16 +44,26 @@ model; alignment, tone and duration remain MFA-based.
 
 | | |
 |---|---|
-| Acoustic model | **37.9 h**, 106,441 utterances, 2,047 speaker groups |
-| Alignment | **99.65%** of training utterances; **100%** of the 3,583-utterance local corpus |
-| Dictionary | 9,092 entries, 31 phones, 0 G2P failures |
-| Vowel identity | **87.3%** / macro F1 **0.811** on 31 held-out **studio** speakers |
-| Tone detection | 73.0% held out, speaker-disjoint (chance 38.1%) |
-| Omission detection | 95.9% caught at 4.6% false alarms |
-| Substitution, vowel check | **94.0%** caught at 3.8% false alarms |
-| Substitution, GOP | 87.9% caught at 2.0% false alarms |
-| Naming what was said | 1.5% false-substitution rate |
-| Tests | **183 passing** |
+| Acoustic model | **~118 h**, 193,309 utterances, 2,801 speakers, every line diacritized |
+| Alignment | **99.8%** of training utterances |
+| Dictionary | 15,734 entries, 33 phones; 0.30% of utterances lost to unpronounceable words |
+| Vowel identity | **89.5%** / macro F1 **0.834** on 39 held-out **studio** speakers |
+| Tone detection | **75.9%** held out, speaker-disjoint (chance 37.2%) |
+| Omission detection | 83.9% caught at 7.2% false alarms |
+| Substitution, vowel check | 74.3% caught at 2.9% false alarms |
+| Substitution, GOP | **91.2%** caught at 2.7% false alarms |
+| Tests | **111 passing** |
+
+The acoustic model was retrained from 37.9 h to ~118 h, which halved the failure
+that everything else was working around: vowels aligned to under 40 ms on SLR86
+fell from **15.1% to 5.3%**. Those degenerate spans were read confidently and
+wrongly, and forced a 40 ms floor that suppressed real errors along with false
+ones. At 0-30 ms the classifier now reads P(expected) = 0.969, so the floor is
+30 ms and short vowels are judged rather than skipped.
+
+The previous model was trained with `require_tone_marks` disabled and so learned
+from undiacritized lines, which teaches it that `ọ` and `o` are one vowel. Every
+line in the new corpus carries diacritics.
 
 ### The features were the ceiling, not the data
 
@@ -67,6 +77,17 @@ Yoruba-fine-tuned wav2vec2 model, changing nothing else:
 | 39 hand-designed | 39 | 0.595 | 0.432 | 0.249 | 0.009 | 0.129 | 0.307 | 0.256 |
 | **wav2vec2 layer 16** | 1024 | **0.873** | **0.811** | **0.791** | **0.714** | **0.696** | **0.813** | **0.718** |
 | both concatenated | 1063 | 0.876 | 0.812 | 0.779 | 0.727 | 0.666 | 0.811 | 0.727 |
+
+Retraining the aligner on ~118 h and re-extracting from the new boundaries takes
+the same features to **0.895 / 0.834** on 555,013 vowels from 2,800 speakers.
+That is +0.023 macro F1 for 4.2x the data, which says the ceiling is the
+representation rather than the corpus: replacing the features was worth an order
+of magnitude more than enlarging the corpus, and a fine-tuned encoder is the
+next lever rather than more Yoruba audio.
+
+`En` is not solved so much as unmeasurable -- 26 held-out examples, so its F1
+carries no information. The weakest class that can actually be measured is `in`
+at 0.695.
 
 Nasal F1 improves 3–5×. All six minimal-pair contrasts now clear 91%:
 

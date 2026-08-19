@@ -10,8 +10,7 @@ SAID = {"my_attempt.wav":  "àbùbùtán bíi omi òkun  (CORRECT)",
         "my_attempt1.wav": "àbùbùtu bíi omi ọkàn",
         "my_attempt2.wav": "àbùbùtan omi ọkàn",
         "my_attempt3.wav": "àbùbùtan omi ọkun"}
-SC = Path("/tmp/claude-1000/-home-seqaeon-Downloads-Yoruba-Learner/"
-          "50984b2d-b066-4124-b637-ebb58cd6f13a/scratchpad/att")
+SC = Path(__file__).resolve().parent.parent / "tests" / "attempts"
 p = AssessmentPipeline(EngineConfig())
 print(f"vowel backend: {'wav2vec2' if p.vowel_verifier and p.vowel_verifier.uses_wav2vec else 'Praat'}\n")
 for name, said in SAID.items():
