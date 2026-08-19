@@ -17,19 +17,18 @@
 set -u
 
 PY=/home/seqaeon/Downloads/venv/bin/python
-OUT=models/w2v_slices
-TOTAL=55665
+OUT=models/w2v_slices_v3
+TOTAL=59951
 SLICE=${SLICE:-4000}
 # A slice of 4,000 runs about 27 minutes at the observed 2.5 utt/s; 50 minutes
 # leaves room for a slow one without waiting out a hang.
 BUDGET=${BUDGET:-3000}
 RETRIES=${RETRIES:-2}
 
+# One directory now, chosen by select_extraction_set.py according to what each
+# utterance contains rather than by even sampling across corpora.
 CORPORA=(
-  "output/aligned_v2/slr86:data/train_corpus"
-  "output/aligned_v2/studio:data/train_corpus"
-  "output/aligned_v2/yecs:data/train_corpus"
-  "output/aligned_v2/mich:data/train_corpus"
+  "output/aligned_v3:data/train_corpus"
 )
 
 mkdir -p "$OUT"

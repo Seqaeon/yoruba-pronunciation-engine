@@ -119,9 +119,22 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     for existing in args.out.iterdir():
         existing.unlink()
+
+    # Basenames are not unique across speaker directories -- two corpora can
+    # both contain waxal_-00000_0_69.TextGrid. The extractor keys audio on the
+    # stem, so a colliding name is already ambiguous downstream; the first is
+    # kept and the rest reported rather than silently overwriting.
+    linked = collided = 0
     for grid in chosen:
-        (args.out / grid.name).symlink_to(grid.resolve())
-    print(f"\nlinked into {args.out}")
+        target = args.out / grid.name
+        if target.exists():
+            collided += 1
+            continue
+        target.symlink_to(grid.resolve())
+        linked += 1
+    print(f"\nlinked {linked:,} into {args.out}")
+    if collided:
+        print(f"{collided:,} skipped: basename already taken by another speaker")
     return 0
 
 

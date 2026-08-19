@@ -43,6 +43,29 @@ ARTEFACT = {"en": "e", "on": "o"}
 FRAME_S = 0.02
 
 
+def load_encoder(path):
+    """Load a wav2vec2 checkpoint whether or not it carries a CTC head.
+
+    The shipped checkpoint is a ``Wav2Vec2ForCTC``; a fine-tuned one saved from
+    this project is a bare ``Wav2Vec2Model``, because fine-tuning replaces the
+    CTC head with a vowel head that is thrown away afterwards. Only hidden
+    states are ever read, so either class serves -- but loading a headless
+    checkpoint as ``Wav2Vec2ForCTC`` silently invents an ``lm_head``, and
+    loading a truncated one against a config that still claims 24 layers
+    silently invents the missing layers. Reading the config first avoids both.
+    """
+    import json  # noqa: PLC0415
+    from pathlib import Path as _Path  # noqa: PLC0415
+    from transformers import Wav2Vec2ForCTC, Wav2Vec2Model  # noqa: PLC0415
+
+    config = _Path(path) / "config.json"
+    architectures = []
+    if config.exists():
+        architectures = json.loads(config.read_text()).get("architectures") or []
+    cls = Wav2Vec2ForCTC if "Wav2Vec2ForCTC" in architectures else Wav2Vec2Model
+    return cls.from_pretrained(path)
+
+
 def spans(alignment):
     """Vowel intervals worth measuring, in time order."""
     return [p for p in alignment.phones if is_vowel_phone(p.label)]
@@ -69,10 +92,8 @@ def main() -> int:
 
     import torch
     import soundfile as sf
-    from transformers import Wav2Vec2ForCTC
-
     device = args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu"
-    model = Wav2Vec2ForCTC.from_pretrained(args.model).eval().to(device)
+    model = load_encoder(args.model).eval().to(device)
     print(f"{args.model} on {device}; layers {args.layers}")
 
     pairs = []
