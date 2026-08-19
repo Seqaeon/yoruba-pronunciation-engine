@@ -163,6 +163,14 @@ def main() -> int:
         "holdout_vowels": int(hold.sum()),
         "holdout_domain": "studio only (SLR86 + IroyinSpeech)",
         "acoustic_model": "yoruba_acoustic_v2 (118 h, 2,801 speakers)",
+        # The shipped model is refit on everything, held-out rows included,
+        # because that is the model worth shipping. Scoring it on its own
+        # held-out set afterwards therefore measures training accuracy, not
+        # generalisation. Recording the speakers makes that detectable instead
+        # of leaving a later comparison to produce a flattering number in
+        # silence -- which it did once.
+        "refit_on_all_data": True,
+        "holdout_speakers": sorted({s for s in speakers[hold]}),
         "class_balanced": True,
         "cepstral_normalization": "none",
         "audio_sample_rate": 16000,
