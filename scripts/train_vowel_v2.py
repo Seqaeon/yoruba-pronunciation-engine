@@ -44,11 +44,24 @@ from yoruba_engine.segmental.classifier import (  # noqa: E402
     VowelClassifier, build_estimator,
 )
 
-#: Speaker prefixes that are both fully diacritized and studio-quality, and so
-#: eligible for the held-out set. ``slr86__`` is OpenSLR SLR86; the IroyinSpeech
-#: subset of the studio corpus keeps its own name inside the ``studio__`` prefix.
-#: Pseudo-speaker buckets (``_unk``) are excluded -- they pool unrelated voices,
-#: so holding one out does not hold a speaker out.
+#: Sources eligible for the held-out set: fully diacritized, with real speaker
+#: labels. Pseudo-speaker buckets (``_unk``) are excluded -- they pool unrelated
+#: voices, so holding one out does not hold a speaker out.
+#:
+#: YECS is included, and that is a deliberate change. The held-out set was
+#: previously SLR86 and IroyinSpeech only, on the reasoning that learners record
+#: in studio-ish conditions. The cost was that ``ẹn`` barely occurs in either, so
+#: the class had 26 held-out examples and its F1 carried no information -- it
+#: could be trained on 2,937 examples but never scored. A class you cannot
+#: measure is a class you cannot tell you have improved.
+#:
+#: YECS is 99.5% consistent with the corpus spellings and, being recorded
+#: through a device-agnostic web app, is arguably closer to what a learner's
+#: laptop produces than SLR86's careful recordings are.
+HOLDOUT_PREFIXES = ("slr86__", "studio__iroyin_", "studio__commonvoice_", "yecs__")
+
+#: The narrower definition used before, kept so the headline figure stays
+#: comparable across versions rather than silently changing meaning.
 STUDIO_PREFIXES = ("slr86__", "studio__iroyin_")
 NASAL = ["an", "En", "in", "On", "un"]
 #: Contrasts that decide real words: òkun/ọkàn turns on the first pair,
@@ -58,6 +71,23 @@ CONTRASTS = [("un", "an"), ("an", "un"), ("o", "O"), ("O", "o"), ("e", "E"), ("E
 
 def is_studio(speaker: str) -> bool:
     return speaker.startswith(STUDIO_PREFIXES) and "_unk" not in speaker
+
+
+def is_eligible(speaker: str) -> bool:
+    return speaker.startswith(HOLDOUT_PREFIXES) and "_unk" not in speaker
+
+
+def source_of(speaker: str) -> str:
+    """The corpus a speaker came from, for a per-source breakdown."""
+    if speaker.startswith("slr86__"):
+        return "slr86"
+    if speaker.startswith("yecs__"):
+        return "yecs"
+    for name in ("iroyin", "commonvoice", "ljspeech", "thisniyi", "waxal",
+                 "michsethowusu"):
+        if speaker.startswith(f"studio__{name}"):
+            return name
+    return "other"
 
 
 def held_out(speaker: str, percent: int = 25) -> bool:
@@ -124,18 +154,18 @@ def main() -> int:
     y = np.fromiter((position[name] for name in labels), dtype=np.int64,
                     count=len(labels))
 
-    studio = np.fromiter((is_studio(s) for s in speakers), dtype=bool,
-                         count=len(speakers))
-    hold = np.fromiter((is_studio(s) and held_out(s) for s in speakers),
+    hold = np.fromiter((is_eligible(s) and held_out(s) for s in speakers),
                        dtype=bool, count=len(speakers))
+    studio_hold = np.fromiter((is_studio(s) and held_out(s) for s in speakers),
+                              dtype=bool, count=len(speakers))
     train = ~hold
-    print(f"studio-eligible vowels: {studio.sum():,} from "
-          f"{len({s for s in speakers if is_studio(s)}):,} speakers")
     print(f"held out: {hold.sum():,} vowels from "
-          f"{len({s for s in speakers[hold]}):,} speakers")
+          f"{len(set(speakers[hold])):,} speakers")
+    by_source = Counter(source_of(s) for s in speakers[hold])
+    print("   " + "  ".join(f"{k}={v:,}" for k, v in by_source.most_common()))
     if not hold.any():
         print("\nEMPTY HELD-OUT SET -- the speaker prefixes do not match "
-              "STUDIO_PREFIXES.\nSpeakers look like: "
+              "HOLDOUT_PREFIXES.\nSpeakers look like: "
               + ", ".join(sorted(set(speakers))[:3]))
         return 1
 
@@ -144,6 +174,20 @@ def main() -> int:
     proba = model.predict_proba(X[hold])
     predicted = proba.argmax(axis=1)
     accuracy, macro = report(y[hold], predicted, proba, label_set, position)
+
+    # The narrower studio-only figure, so the headline stays comparable with
+    # versions measured before YECS speakers were eligible.
+    inner = studio_hold[hold]
+    if inner.any():
+        from sklearn.metrics import accuracy_score, f1_score
+        s_acc = accuracy_score(y[hold][inner], predicted[inner])
+        s_macro = f1_score(y[hold][inner], predicted[inner], average="macro",
+                           zero_division=0)
+        print(f"\nsame model on the old studio-only subset "
+              f"({int(inner.sum()):,} vowels): "
+              f"accuracy {s_acc:.3f}, macro F1 {s_macro:.3f}")
+    else:
+        s_acc = s_macro = float("nan")
 
     if args.dry_run:
         print("\n--dry-run: nothing saved")
@@ -161,7 +205,9 @@ def main() -> int:
         "holdout_accuracy": round(accuracy, 4),
         "macro_f1": round(macro, 4),
         "holdout_vowels": int(hold.sum()),
-        "holdout_domain": "studio only (SLR86 + IroyinSpeech)",
+        "holdout_domain": "SLR86 + IroyinSpeech + Common Voice + YECS",
+        "holdout_studio_only_accuracy": round(float(s_acc), 4),
+        "holdout_studio_only_macro_f1": round(float(s_macro), 4),
         "acoustic_model": "yoruba_acoustic_v2 (118 h, 2,801 speakers)",
         # The shipped model is refit on everything, held-out rows included,
         # because that is the model worth shipping. Scoring it on its own
