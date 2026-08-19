@@ -55,6 +55,13 @@ def main() -> int:
         "output/aligned:data/mfa_corpus", "output/studio_aligned:data/studio_corpus"])
     parser.add_argument("--layers", type=int, nargs="+", default=[12])
     parser.add_argument("--limit", type=int, help="Utterances per corpus, for a sweep")
+    parser.add_argument("--offset", type=int, default=0,
+                        help="Skip this many utterances before extracting. With "
+                             "--take, splits one long run into slices that "
+                             "checkpoint independently -- a GPU that hangs then "
+                             "costs one slice rather than the whole job.")
+    parser.add_argument("--take", type=int, default=0,
+                        help="Extract at most this many utterances after --offset.")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
@@ -74,6 +81,9 @@ def main() -> int:
         grids = sorted(Path(aligned).rglob("*.TextGrid"))[: args.limit or None]
         index = {p.stem: p for p in Path(audio).rglob("*.wav")}
         pairs += [(g, index[g.stem]) for g in grids if g.stem in index]
+    if args.offset or args.take:
+        end = args.offset + args.take if args.take else None
+        pairs = pairs[args.offset:end]
     print(f"{len(pairs):,} utterances with audio")
 
     out = {layer: [] for layer in args.layers}
