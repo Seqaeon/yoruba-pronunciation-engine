@@ -56,7 +56,8 @@ def verify(path: Path, expected: dict) -> str:
     return "ok"
 
 
-def download_with_gh(repo: str, tag: str, destination: Path) -> bool:
+def download_with_gh(repo: str, tag: str, destination: Path,
+                     asset: str | None = None) -> bool:
     """Fetch a release asset through the GitHub CLI.
 
     Release assets on a **private** repository are not reachable over anonymous
@@ -71,12 +72,19 @@ def download_with_gh(repo: str, tag: str, destination: Path) -> bool:
     destination.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         ["gh", "release", "download", tag, "--repo", repo,
-         "--pattern", destination.name, "--dir", str(destination.parent), "--clobber"],
+         "--pattern", asset or destination.name,
+         "--dir", str(destination.parent), "--clobber"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
         print(f"    gh: {(result.stderr or result.stdout).strip()[:160]}")
         return False
+    # gh saves the file under the release's name for it, which is not always the
+    # name the artifact carries on disk -- two encoders both live at
+    # model.safetensors locally but cannot share one name on the release.
+    landed = destination.parent / (asset or destination.name)
+    if landed != destination and landed.exists():
+        landed.replace(destination)
     return destination.exists()
 
 
@@ -120,9 +128,14 @@ def main() -> int:
         state = verify(path, expected)
         if state != "ok" and not args.check:
             print(f"{relative:<40}{state:<13}fetching")
-            fetched = download_with_gh(args.repo, tag, path)
+            # Release assets live in one flat namespace, so two artifacts whose
+            # basename is model.safetensors -- the upstream encoder and the
+            # fine-tuned one -- cannot both be uploaded under it. The manifest
+            # names the asset explicitly where the basename would collide.
+            asset = expected.get("asset") or Path(relative).name
+            fetched = download_with_gh(args.repo, tag, path, asset=asset)
             if not fetched:
-                url = base + Path(relative).name
+                url = base + asset
                 try:
                     download(url, path)
                     fetched = True

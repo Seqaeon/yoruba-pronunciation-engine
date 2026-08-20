@@ -47,10 +47,10 @@ model; alignment, tone and duration remain MFA-based.
 | Acoustic model | **~118 h**, 193,309 utterances, 2,801 speakers, every line diacritized |
 | Alignment | **99.8%** of training utterances |
 | Dictionary | 15,734 entries, 33 phones; 0.30% of utterances lost to unpronounceable words |
-| Vowel identity | **89.5%** / macro F1 **0.834** on 39 held-out **studio** speakers |
+| Vowel identity | **91.2%** / macro F1 **0.887** on 79 held-out speakers across four corpora |
 | Tone detection | **75.9%** held out, speaker-disjoint (chance 37.2%) |
 | Omission detection | 83.9% caught at 7.2% false alarms |
-| Substitution, vowel check | 74.3% caught at 2.9% false alarms |
+| Substitution, vowel check | **86.7%** caught at **2.7%** false alarms |
 | Substitution, GOP | **91.2%** caught at 2.7% false alarms |
 | Tests | **111 passing** |
 
@@ -85,9 +85,37 @@ representation rather than the corpus: replacing the features was worth an order
 of magnitude more than enlarging the corpus, and a fine-tuned encoder is the
 next lever rather than more Yoruba audio.
 
-`En` is not solved so much as unmeasurable -- 26 held-out examples, so its F1
-carries no information. The weakest class that can actually be measured is `in`
-at 0.695.
+### The encoder was the ceiling, and it moved
+
+Everything above trains the *classifier* on top of a **frozen** encoder. Fine-tuning
+the encoder itself -- the first component of this project that is genuinely ours
+rather than a redistribution of LyngualLabs' weights -- was measured on identical
+rows, with the same classifier and the same speaker split, so only the encoder
+differs:
+
+| | accuracy | macro F1 |
+|---|---|---|
+| frozen upstream | 0.906 | 0.879 |
+| **fine-tuned** | **0.923** | **0.904** |
+
+Every one of the twelve classes improved. The largest gains are where the engine
+was weakest: `in` 0.755 to 0.834, `u` 0.805 to 0.856.
+
+Two changes landed together and had to be separated to mean anything. Selecting
+extraction by rare-vowel content rather than evenly moves 0.863 to 0.879; the
+fine-tune adds 0.879 to 0.904. Reported together they would have credited the
+encoder with 0.041 when it earned 0.025.
+
+### On `En`
+
+An earlier version of this file called `En` unlearnable, citing 0.009 F1 on
+hand-designed features and 0.737 with 26 held-out examples. That was a
+measurement artifact: the held-out set was SLR86 and IroyinSpeech only, and
+neither contains much `ẹn`. Widening it to include Common Voice and YECS took
+support to 349 and F1 to 0.879 -- better than `an`, `un`, `u`, `in` and `e`.
+
+The class was never broken; it was unmeasured. The genuinely weak classes are
+`in` and `u`.
 
 Nasal F1 improves 3–5×. All six minimal-pair contrasts now clear 91%:
 
