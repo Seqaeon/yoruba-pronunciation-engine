@@ -30,6 +30,7 @@ for running two Praat analyses on every assessment forever.
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import sys
 from collections import Counter
@@ -95,17 +96,42 @@ def held_out(speaker: str, percent: int = 25) -> bool:
     return int(hashlib.md5(speaker.encode("utf-8")).hexdigest()[:8], 16) % 100 < percent
 
 
-def load(paths: list[Path]):
-    rows, labels, speakers = [], [], []
-    for path in sorted(paths):
-        data = np.load(path, allow_pickle=True)
-        layer = next(k for k in data.files if k.startswith("layer_"))
-        rows.append(data[layer].astype(np.float32))
-        labels.append(data["labels"].astype(str))
-        speakers.append(data["speakers"].astype(str))
+def load(paths: list[Path], layer_name: str | None = None):
+    """Read the caches into one array without ever holding two copies.
+
+    ``np.vstack`` keeps every input alive alongside its output, which at
+    919,624 vowels x 1024 float32 means 7.5 GB before anything is trained on.
+    Combined with the copy that ``X[train]`` makes, an earlier version reached
+    20.6 GB and was killed by the OOM reaper. Reading the shapes first, then
+    filling a single pre-allocated array, holds the peak to one copy.
+    """
+    paths = sorted(paths)
+    shapes, layer = [], None
+    for path in paths:
+        with np.load(path, allow_pickle=True) as data:
+            available = [k for k in data.files if k.startswith("layer_")]
+            layer = layer_name or available[0]
+            if layer not in available:
+                raise SystemExit(f"{path.name} has {available}, not {layer}")
+            shapes.append(data[layer].shape)
+    total = sum(shape[0] for shape in shapes)
+    width = shapes[0][1]
+    print(f"  allocating {total:,} x {width} float32 "
+          f"({total * width * 4 / 1e9:.2f} GB)", flush=True)
+
+    rows = np.empty((total, width), dtype=np.float32)
+    labels: list[np.ndarray] = []
+    speakers: list[np.ndarray] = []
+    at = 0
+    for path in paths:
+        with np.load(path, allow_pickle=True) as data:
+            block = data[layer]
+            rows[at:at + len(block)] = block
+            at += len(block)
+            labels.append(data["labels"].astype(str))
+            speakers.append(data["speakers"].astype(str))
         print(f"  {path.name}: {len(labels[-1]):,} vowels", flush=True)
-    return (np.vstack(rows), np.concatenate(labels), np.concatenate(speakers),
-            layer)
+    return rows, np.concatenate(labels), np.concatenate(speakers), layer
 
 
 def report(y_true, predicted, proba, label_set, position) -> tuple[float, float]:
@@ -141,11 +167,22 @@ def main() -> int:
     parser.add_argument("caches", nargs="+", type=Path)
     parser.add_argument("--out", type=Path,
                         default=PROJECT_ROOT / "models" / "vowel_classifier.joblib")
+    parser.add_argument("--encoder", default="models/finetuned_encoder",
+                        help="the checkpoint these features were extracted "
+                             "with; recorded so the engine loads the matching "
+                             "one rather than a default")
+    parser.add_argument("--max-per-class", type=int, default=60_000,
+                        metavar="N",
+                        help="cap training rows per class, keeping every row of "
+                             "the rare classes (default 60,000). The held-out "
+                             "set is never capped.")
+    parser.add_argument("--layer", help="which cached layer to train on, e.g. "
+                        "layer_9. Caches from a layer sweep hold several.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     print(f"loading {len(args.caches)} cache file(s)")
-    X, labels, speakers, layer = load(args.caches)
+    X, labels, speakers, layer = load(args.caches, args.layer)
     print(f"\n{X.shape[0]:,} vowels x {X.shape[1]} dims from "
           f"{len(set(speakers)):,} speakers ({layer})")
 
@@ -169,10 +206,47 @@ def main() -> int:
               + ", ".join(sorted(set(speakers))[:3]))
         return 1
 
+    # Cap the common classes. 919,624 vowels at 1024 float32 needs 3.8 GB, and
+    # the copy the estimator makes on top of that reached 21.1 GB and was killed
+    # -- on a machine with 21 GB free. Nearly half those rows are ``i`` and
+    # ``a``, both already above 0.93 F1, so the memory was being spent where it
+    # buys nothing. Rare classes are kept whole: they are the reason the
+    # extraction was weighted towards them in the first place.
+    if args.max_per_class:
+        rng = np.random.default_rng(0)
+        keep = hold.copy()                      # never cap the held-out rows
+        for name in label_set:
+            rows = np.flatnonzero((labels == name) & ~hold)
+            if name in NASAL or len(rows) <= args.max_per_class:
+                keep[rows] = True
+                continue
+            keep[rng.choice(rows, args.max_per_class, replace=False)] = True
+        dropped = int((~keep).sum())
+        if dropped:
+            X, labels, speakers = X[keep], labels[keep], speakers[keep]
+            y, hold = y[keep], hold[keep]
+            studio_hold = studio_hold[keep]
+            train = ~hold
+            gc.collect()
+            print(f"\ncapped common classes at {args.max_per_class:,}: "
+                  f"dropped {dropped:,} rows, {len(y):,} remain "
+                  f"({len(y) * X.shape[1] * 4 / 1e9:.2f} GB)")
+            print("   " + "  ".join(
+                f"{n}={int((labels == n).sum()):,}" for n in label_set))
+
     print("\nfitting on the training split...", flush=True)
-    model = build_estimator(balanced=True).fit(X[train], y[train])
-    proba = model.predict_proba(X[hold])
+    # X[train] is a copy, not a view, and at this size that copy is the
+    # difference between fitting and being killed. Take the held-out rows first
+    # (they are small), then let the training copy be the only large temporary.
+    X_hold = X[hold]
+    X_train = X[train]
+    model = build_estimator(balanced=True).fit(X_train, y[train])
+    del X_train
+    gc.collect()
+    proba = model.predict_proba(X_hold)
     predicted = proba.argmax(axis=1)
+    del X_hold, model
+    gc.collect()
     accuracy, macro = report(y[hold], predicted, proba, label_set, position)
 
     # The narrower studio-only figure, so the headline stays comparable with
@@ -199,6 +273,10 @@ def main() -> int:
         "features_kind": "wav2vec2 layer 16",
         "feature_dims": int(X.shape[1]),
         "wav2vec_model": "LyngualLabs/mms-300m-yoruba-english",
+        # Which checkpoint these features came from. The engine loads this
+        # rather than any default: fine-tuning changes what the 1024 dimensions
+        # mean, so a classifier fitted to one encoder reads noise from another.
+        "wav2vec_checkpoint": str(args.encoder),
         "wav2vec_layer": int(layer.split("_")[1]),
         "training_vowels": int(len(y)),
         "speakers": len(set(speakers)),

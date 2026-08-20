@@ -95,3 +95,6 @@ models/w2v_slices_v3/
 models/w2v_slices_v3_ft/
 models/finetuned_encoder/
 output/aligned_v3/
+models/whisper-yoruba/
+models/whisper_slices/
+models/whisper_tuned/
