@@ -109,17 +109,27 @@ class Wav2VecExtractor:
 
     @staticmethod
     def resolve(path: str | Path) -> Path:
-        """The requested encoder, or the upstream one if it is not installed."""
+        """The requested encoder, or an error naming what is missing.
+
+        This used to fall back to the upstream checkpoint with a warning. That
+        was the wrong behaviour: fine-tuning changes what the 1024 dimensions
+        mean, so running a classifier against an encoder it was not fitted to
+        produces confident wrong answers rather than obvious failure -- the same
+        shape of mismatch that once made this engine score 0 out of 23 on real
+        audio while every test passed.
+
+        A missing encoder is a broken install, and a broken install should say
+        so.
+        """
         candidate = Path(path)
         if candidate.exists():
             return candidate
-        fallback = Path(FALLBACK_MODEL)
-        if fallback.exists():
-            logger.warning("%s not found; falling back to %s. Accuracy is lower: "
-                           "the shipped classifier is fitted to the fine-tuned "
-                           "encoder's features.", candidate, fallback)
-            return fallback
-        return candidate
+        raise FileNotFoundError(
+            f"Encoder not found: {candidate}\n"
+            "The vowel classifier records the encoder it was fitted to, and "
+            "reads noise from any other.\n"
+            "Fetch it with:  python scripts/fetch_models.py"
+        )
 
     def _load(self):
         """Load once, on first use. The model is ~1.26 GB."""
