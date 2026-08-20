@@ -324,3 +324,95 @@ class MMSTranscriptProvider:
     @property
     def recognizes_speech(self) -> bool:
         return True
+
+
+class WhisperTranscriptProvider:
+    """Transcribes with a Whisper checkpoint, giving open-vocabulary text.
+
+    Forced alignment cannot report what a learner said, only how badly the
+    prompt fits: MFA takes the prompt as given and finds the best placement for
+    it. Every substitution the engine names therefore has to be recovered
+    indirectly, by matching measured vowels against the 9,092-entry dictionary
+    -- which is why a learner reading ``òkun`` who says ``ọkun`` is flagged but
+    never named. ``ọkun`` occurs zero times in 209,265 corpus tokens and is not
+    in the lexicon, so no decoder margin can surface it.
+
+    Whisper has no lexicon to be limited by. Measured on the project's four test
+    recordings it named the substituted word every time, including ``ọkun``, and
+    caught both omissions.
+
+    It is weak where the engine is strong, and that is why this supplements
+    rather than replaces the rest: its tone marks are unreliable (``àbùbùtàn``
+    for ``àbùbùtán``, ``ọkún`` for ``ọkun``), and it produces no phone
+    boundaries at all, so tone analysis and vowel spans still come from forced
+    alignment and pitch.
+
+    Cost is about 2.8 s per utterance on four CPU threads, roughly flat with
+    duration because Whisper pads every input to 30 seconds.
+    """
+
+    def __init__(self, model_path: Path | str = "models/whisper-yoruba",
+                 device: str | None = None, language: str = "yo") -> None:
+        self.model_path = Path(model_path)
+        self.language = language
+        self._device = device
+        self._model = None
+        self._processor = None
+
+    @property
+    def recognizes_speech(self) -> bool:
+        return True
+
+    def _load(self):
+        if self._model is not None:
+            return self._model
+        try:
+            import torch  # noqa: PLC0415
+            from transformers import (  # noqa: PLC0415
+                WhisperForConditionalGeneration, WhisperProcessor,
+            )
+        except ImportError as exc:
+            raise ASRNotConfiguredError(
+                "Whisper transcription needs torch and transformers:\n"
+                "  pip install torch transformers"
+            ) from exc
+        if not (self.model_path / "config.json").exists():
+            raise ASRNotConfiguredError(
+                f"No Whisper checkpoint at {self.model_path}. Fetch it with:\n"
+                "  python scripts/fetch_models.py"
+            )
+        device = self._device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self._processor = WhisperProcessor.from_pretrained(self.model_path)
+        self._model = WhisperForConditionalGeneration.from_pretrained(
+            self.model_path).eval().to(device)
+        self._torch = torch
+        self._resolved_device = device
+        logger.info("Loaded Whisper transcriber from %s on %s",
+                    self.model_path, device)
+        return self._model
+
+    def transcribe(self, audio_path: Path, prompt: str | None = None) -> str:
+        """Return what the recording actually contains, ignoring the prompt."""
+        model = self._load()
+        torch = self._torch
+        try:
+            import numpy as np  # noqa: PLC0415
+            import soundfile as sf  # noqa: PLC0415
+
+            samples, rate = sf.read(str(audio_path), dtype="float32", always_2d=False)
+        except Exception as exc:
+            raise ASRNotConfiguredError(f"Could not read {audio_path}: {exc}") from exc
+        if getattr(samples, "ndim", 1) > 1:
+            samples = samples.mean(axis=1)
+        if rate != 16000:
+            count = int(len(samples) / rate * 16000)
+            samples = np.interp(np.linspace(0, len(samples) - 1, count),
+                                np.arange(len(samples)), samples).astype("float32")
+
+        features = self._processor(samples, sampling_rate=16000,
+                                   return_tensors="pt").input_features
+        with torch.inference_mode():
+            tokens = model.generate(features.to(self._resolved_device),
+                                    max_new_tokens=128)
+        text = self._processor.batch_decode(tokens, skip_special_tokens=True)[0]
+        return normalize(text.strip())

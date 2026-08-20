@@ -67,17 +67,39 @@ def main() -> int:
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--take", type=int, default=0)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--extractor",
+                        help="where to read the feature extractor from. An "
+                             "encoder-only checkpoint does not carry one.")
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
     logging.disable(logging.INFO)
 
     import soundfile as sf
     import torch
-    from transformers import WhisperFeatureExtractor, WhisperModel
+    import json as _json
+    from transformers import (
+        WhisperFeatureExtractor, WhisperModel,
+    )
+    from transformers.models.whisper.modeling_whisper import WhisperEncoder
 
     device = args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu"
-    features = WhisperFeatureExtractor.from_pretrained(args.model)
-    model = WhisperModel.from_pretrained(args.model).encoder.eval().to(device)
+
+    # Fine-tuning here saves the encoder alone, since the decoder takes no part
+    # in vowel identity; the upstream checkpoint is a full WhisperModel. Reading
+    # the config tells the two apart, rather than guessing and getting either a
+    # missing attribute or silently randomised weights.
+    config_path = Path(args.model) / "config.json"
+    architectures = []
+    if config_path.exists():
+        architectures = _json.loads(
+            config_path.read_text(encoding="utf-8")).get("architectures") or []
+    if "WhisperEncoder" in architectures:
+        model = WhisperEncoder.from_pretrained(args.model).eval().to(device)
+        extractor_source = args.extractor or "models/whisper-yoruba"
+    else:
+        model = WhisperModel.from_pretrained(args.model).encoder.eval().to(device)
+        extractor_source = args.extractor or args.model
+    features = WhisperFeatureExtractor.from_pretrained(extractor_source)
     print(f"{args.model} encoder on {device}; layers {args.layers} "
           f"of {model.config.encoder_layers}")
 

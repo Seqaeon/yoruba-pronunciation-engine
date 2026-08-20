@@ -108,6 +108,28 @@ class SegmentalResult:
         return sum(not c.suspect for c in self.checks) / len(self.checks)
 
 
+def _extractor_for(metadata: dict, kind: str):
+    """Build the extractor the classifier's features came from.
+
+    Whisper and wav2vec2 both emit one frame per 20 ms and both pool the same
+    way, so the rest of the verifier is indifferent between them -- but their
+    dimensions and their meaning differ entirely, and a classifier fitted to one
+    reads noise from the other.
+    """
+    if kind == "whisper":
+        from .whisper import DEFAULT_LAYER, WhisperExtractor  # noqa: PLC0415
+
+        return WhisperExtractor(
+            model_path=metadata.get("encoder_checkpoint") or "models/whisper-yoruba",
+            layer=int(metadata.get("encoder_layer", DEFAULT_LAYER)))
+
+    from .wav2vec import Wav2VecExtractor  # noqa: PLC0415
+
+    return Wav2VecExtractor(
+        model_path=_checkpoint_for(metadata),
+        layer=int(metadata.get("wav2vec_layer", 16)))
+
+
 def _checkpoint_for(metadata: dict) -> str:
     """The encoder checkpoint a classifier was fitted to.
 
@@ -148,12 +170,16 @@ class VowelVerifier:
         # Reading it from metadata makes that mismatch impossible rather than
         # merely unlikely.
         kind = str(classifier.metadata.get("features_kind", ""))
-        self.uses_wav2vec = "wav2vec" in kind
+        # Which encoder produced the features this classifier was fitted to.
+        # The two are a matched pair: pooling Whisper frames into a classifier
+        # trained on wav2vec2 frames reads noise, so the classifier decides.
+        self.encoder_kind = "whisper" if "whisper" in kind.lower() else (
+            "wav2vec" if "wav2vec" in kind.lower() else "")
+        self.uses_wav2vec = bool(self.encoder_kind)
         self.formants = FormantExtractor()
         self.mfcc = MFCCExtractor()
         self.wav2vec = None
         if self.uses_wav2vec:
-            from .wav2vec import Wav2VecExtractor  # noqa: PLC0415
 
             # The classifier and the encoder are a matched pair: fine-tuning
             # moves what the 1024 dimensions mean, so a classifier fitted to one
@@ -161,9 +187,7 @@ class VowelVerifier:
             # the checkpoint it was fitted to, and that wins over any default --
             # otherwise pointing the engine at a new encoder silently degrades
             # every verdict, with nothing raising.
-            self.wav2vec = Wav2VecExtractor(
-                model_path=_checkpoint_for(classifier.metadata),
-                layer=int(classifier.metadata.get("wav2vec_layer", 16)))
+            self.wav2vec = _extractor_for(classifier.metadata, self.encoder_kind)
             if not self.wav2vec.available:
                 logger.warning(
                     "Classifier expects wav2vec2 features but no checkpoint is "

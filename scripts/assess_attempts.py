@@ -6,7 +6,7 @@ from yoruba_engine.pipeline import AssessmentPipeline
 logging.disable(logging.WARNING)
 TARGET = "Àbùbùtán bíi omi òkun."
 REF = Path("data/corpus/wavs/yof_00295_00099759266.wav")
-SAID = {"my_attempt.wav":  "àbùbùtán bíi omi òkun  (CORRECT)",
+SAID = {"my_attempt0.wav": "àbùbùtán bíi omi òkun  (CORRECT)",
         "my_attempt1.wav": "àbùbùtu bíi omi ọkàn",
         "my_attempt2.wav": "àbùbùtan omi ọkàn",
         "my_attempt3.wav": "àbùbùtan omi ọkun"}

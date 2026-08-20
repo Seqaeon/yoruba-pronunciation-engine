@@ -167,6 +167,10 @@ def main() -> int:
     parser.add_argument("caches", nargs="+", type=Path)
     parser.add_argument("--out", type=Path,
                         default=PROJECT_ROOT / "models" / "vowel_classifier.joblib")
+    parser.add_argument("--encoder-kind", default="wav2vec2",
+                        choices=("wav2vec2", "whisper"),
+                        help="which encoder produced these features. Recorded "
+                             "so the engine builds the matching extractor.")
     parser.add_argument("--encoder", default="models/finetuned_encoder",
                         help="the checkpoint these features were extracted "
                              "with; recorded so the engine loads the matching "
@@ -270,7 +274,9 @@ def main() -> int:
     print("\nrefitting on everything...", flush=True)
     final = build_estimator(balanced=True).fit(X, y)
     VowelClassifier(model=final, labels=label_set, metadata={
-        "features_kind": "wav2vec2 layer 16",
+        "features_kind": f"{args.encoder_kind} {layer.replace('_', ' ')}",
+        "encoder_checkpoint": str(args.encoder),
+        "encoder_layer": int(layer.split("_")[1]),
         "feature_dims": int(X.shape[1]),
         "wav2vec_model": "LyngualLabs/mms-300m-yoruba-english",
         # Which checkpoint these features came from. The engine loads this
