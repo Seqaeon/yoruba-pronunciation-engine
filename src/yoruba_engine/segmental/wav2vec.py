@@ -47,7 +47,23 @@ FRAME_S = 0.02
 #: every distinction the engine reasons about -- ``ẹ ọ ṣ``, all eight tone-marked
 #: vowels, and the syllabic nasals ``ń ǹ``. A romanized model would have folded
 #: those away before the audio was ever seen.
-DEFAULT_MODEL = "models/lyngual-yoruba"
+#: The encoder the engine reads its features from.
+#:
+#: ``models/finetuned_encoder`` is this project's own: LyngualLabs'
+#: ``mms-300m-yoruba-english`` fine-tuned on 482,541 aligned Yoruba vowel
+#: windows and truncated to the 16 layers actually consumed. Measured against
+#: the frozen upstream encoder on identical rows, identical classifier and
+#: identical speaker split, it lifts macro F1 from 0.879 to 0.904 and improves
+#: every one of the twelve classes -- most at ``in`` (0.755 to 0.834) and ``u``
+#: (0.805 to 0.856), which were the weakest.
+#:
+#: ``models/lyngual-yoruba`` remains valid and is the fallback when the
+#: fine-tuned checkpoint is absent, so an install that has fetched only the
+#: upstream weights still runs.
+DEFAULT_MODEL = "models/finetuned_encoder"
+
+#: Used when :data:`DEFAULT_MODEL` is not present.
+FALLBACK_MODEL = "models/lyngual-yoruba"
 
 #: Which hidden state to pool. Index 0 is the convolutional output, so layer 16
 #: is ``hidden_states[16]``.
@@ -77,7 +93,7 @@ class Wav2VecExtractor:
                 coefficient -- the same failure that once made a correctly
                 spoken word score 0.002.
         """
-        self.model_path = Path(model_path)
+        self.model_path = self.resolve(model_path)
         self.layer = layer
         self.sample_rate_hz = sample_rate_hz
         self._device = device
@@ -91,13 +107,30 @@ class Wav2VecExtractor:
             for name in ("model.safetensors", "pytorch_model.bin")
         )
 
+    @staticmethod
+    def resolve(path: str | Path) -> Path:
+        """The requested encoder, or the upstream one if it is not installed."""
+        candidate = Path(path)
+        if candidate.exists():
+            return candidate
+        fallback = Path(FALLBACK_MODEL)
+        if fallback.exists():
+            logger.warning("%s not found; falling back to %s. Accuracy is lower: "
+                           "the shipped classifier is fitted to the fine-tuned "
+                           "encoder's features.", candidate, fallback)
+            return fallback
+        return candidate
+
     def _load(self):
         """Load once, on first use. The model is ~1.26 GB."""
         if self._model is not None:
             return self._model
         try:
             import torch  # noqa: PLC0415
-            from transformers import Wav2Vec2ForCTC  # noqa: PLC0415
+            import json  # noqa: PLC0415
+            from transformers import (  # noqa: PLC0415
+                Wav2Vec2ForCTC, Wav2Vec2Model,
+            )
         except ImportError as exc:
             raise PitchExtractionError(
                 "Learned vowel features need torch and transformers:\n"
@@ -112,7 +145,18 @@ class Wav2VecExtractor:
             )
         device = self._device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._torch = torch
-        self._model = Wav2Vec2ForCTC.from_pretrained(self.model_path).eval().to(device)
+        # The upstream checkpoint carries a CTC head; a checkpoint fine-tuned by
+        # this project does not, because fine-tuning replaces that head with a
+        # vowel head which is then discarded. Loading a headless checkpoint as
+        # ``Wav2Vec2ForCTC`` silently invents an ``lm_head``. Only hidden states
+        # are ever read, so either class serves once it is chosen honestly.
+        config = Path(self.model_path) / "config.json"
+        architectures = []
+        if config.exists():
+            architectures = json.loads(
+                config.read_text(encoding="utf-8")).get("architectures") or []
+        loader = Wav2Vec2ForCTC if "Wav2Vec2ForCTC" in architectures else Wav2Vec2Model
+        self._model = loader.from_pretrained(self.model_path).eval().to(device)
         self._resolved_device = device
         logger.info("Loaded %s layer %d on %s", self.model_path, self.layer, device)
         return self._model
