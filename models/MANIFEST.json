@@ -102,13 +102,5 @@
     "max_vowel_entropy": 1.5,
     "min_duration_fraction": 0.7,
     "gop_threshold": -1.5
-  },
-  "optional_artifacts": {
-    "models/lyngual-yoruba/model.safetensors": {
-      "bytes": 1262205180,
-      "sha256": "766a4e6c9c98fbb59bb4a2850c0ab0677a1197969564f28aab9b50815368aeb3",
-      "purpose": "The upstream checkpoint the shipped encoder was fine-tuned from. Not fetched by default: a v0.4.0 classifier names models/finetuned_encoder and the engine loads what the classifier names, so this is never opened. It stays attached to the release for classifiers from v0.3.0 and earlier, which do name it. Fetch with --include-optional.",
-      "asset": "model.safetensors"
-    }
   }
 }

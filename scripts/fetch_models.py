@@ -107,10 +107,6 @@ def download(url: str, destination: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--check", action="store_true", help="Verify without downloading")
-    parser.add_argument("--include-optional", action="store_true",
-                        help="Also fetch optional artifacts. These are not "
-                             "needed to run: the upstream encoder is 1.26 GB "
-                             "and a current classifier never opens it.")
     parser.add_argument("--repo", default=DEFAULT_REPO, help="GitHub owner/name")
     parser.add_argument("--tag", help="Release tag; defaults to the manifest's")
     parser.add_argument("--base-url", help="Override where assets are fetched from")
@@ -127,10 +123,7 @@ def main() -> int:
 
     statuses: dict[str, str] = {}
     print(f"{'artifact':<40}{'status':<13}size")
-    wanted = dict(manifest["artifacts"])
-    if args.include_optional:
-        wanted.update(manifest.get("optional_artifacts", {}))
-    for relative, expected in wanted.items():
+    for relative, expected in manifest["artifacts"].items():
         path = PROJECT_ROOT / relative
         state = verify(path, expected)
         if state != "ok" and not args.check:

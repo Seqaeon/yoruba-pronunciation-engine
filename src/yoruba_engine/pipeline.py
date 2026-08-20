@@ -93,6 +93,29 @@ class AssessmentPipeline:
         self.transcript_provider = transcript_provider or PromptedTranscriptProvider()
         self.word_decoder = self._load_word_decoder(self.vowel_verifier)
         self.gop_reference = self._load_gop_reference()
+        self._reference_cache = self._build_reference_cache()
+
+
+    def _build_reference_cache(self):
+        """A cache for reference analyses, or ``None`` if disabled."""
+        directory = getattr(self.config, "reference_cache_dir", None)
+        if directory is None:
+            directory = Path("output") / "reference_cache"
+        if not directory:
+            return None
+        from .cache import ReferenceCache  # noqa: PLC0415
+
+        pitch = self.config.pitch
+        return ReferenceCache.build(
+            directory=Path(directory),
+            acoustic_model=self.config.mfa.acoustic_model,
+            dictionary=self.config.mfa.dictionary,
+            # Pitch settings decide where a vowel starts and how its tone reads,
+            # so a cached analysis is only valid for the settings that made it.
+            pitch_settings=(f"{pitch.time_step_s}:{pitch.edge_trim_ratio}:"
+                            f"{pitch.min_voiced_frames}:{pitch.floor_hz}:"
+                            f"{pitch.ceiling_hz}"),
+        )
 
     @staticmethod
     def _load_tone_classifier(use_tone_classifier: bool | None):
@@ -168,6 +191,33 @@ class AssessmentPipeline:
             phone_scores=alignment.phone_scores,
         )
 
+    def _analyse_reference(
+        self, audio_path: Path, transcript: str, utterance_id: str,
+    ) -> UtteranceAnalysis:
+        """Analyse the reference, reusing the previous result when nothing moved.
+
+        The reference for a prompt is the same file with the same transcript on
+        every assessment, but it was being force-aligned each time -- 17.6
+        seconds of a 43-second request, 41% of the work, recomputed to the same
+        answer. The learner's recording still gets the full treatment; only the
+        half that cannot have changed is reused.
+        """
+        cache = self._reference_cache
+        if cache is None:
+            return self.analyse_utterance(audio_path, transcript,
+                                          utterance_id=utterance_id)
+
+        key = cache.key(audio_path, transcript)
+        cached = cache.get(key)
+        if cached is not None:
+            logger.info("Reusing cached reference analysis for %s", utterance_id)
+            return cached
+
+        analysis = self.analyse_utterance(audio_path, transcript,
+                                          utterance_id=utterance_id)
+        cache.put(key, analysis)
+        return analysis
+
     def assess(
         self,
         reference_audio: Path,
@@ -192,7 +242,7 @@ class AssessmentPipeline:
         """
         utt_id = utterance_id or reference_audio.stem
 
-        reference = self.analyse_utterance(
+        reference = self._analyse_reference(
             reference_audio, target_text, utterance_id=f"{utt_id}_ref"
         )
 
