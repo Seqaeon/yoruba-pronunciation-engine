@@ -191,9 +191,14 @@ class SegmentalConfig:
     #:
     #:     floor    vowels skipped   false flags removed   ratio
     #:     20 ms          0.4%              0.9%            2.3
-    #:     30 ms          2.0%              6.8%            3.4   <- here
-    #:     40 ms          6.8%             20.5%            3.0
-    #:     50 ms         17.2%             32.5%            1.9
+    #:     30 ms          2.0%              7.1%            3.6   <- here
+    #:     40 ms          6.8%             22.3%            3.3
+    #:     50 ms         17.2%             39.3%            2.3
+    #:
+    #: Re-measured against the fine-tuned encoder, which is confident more often
+    #: and correctly so: P(expected) in the 0-30 ms bucket rose from 0.969 to
+    #: 0.988 and median entropy fell from 0.17 to 0.06. 30 ms remains the best
+    #: trade.
     #:
     #: 30 ms both earns its cost best and skips a third as many vowels as 40 ms
     #: did. That matters because the guard was silencing real errors: a learner
@@ -209,10 +214,10 @@ class SegmentalConfig:
     #: 0.46/0.15/0.15/0.12 is the classifier saying it cannot tell, and a
     #: probability floor cannot see that -- 0.46 clears any sane threshold.
     #:
-    #:     ceiling  vowels skipped   false flags removed
-    #:       2.0         0.1%               2.7%
-    #:       1.5         1.5%              21.6%   <- here
-    #:       1.0         6.4%              37.8%
+    #:     ceiling  vowels skipped   false flags removed   ratio
+    #:       2.0         0.0%               0.9%             --
+    #:       1.5         0.2%               4.5%           22.5   <- here
+    #:       1.0         1.4%              14.3%           10.2
     #:
     #: 1.5 removes fourteen times as large a share of false alarms as of vowels
     #: overall, which makes it the cheapest guard in the engine.

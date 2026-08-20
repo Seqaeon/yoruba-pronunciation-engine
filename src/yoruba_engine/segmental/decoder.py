@@ -62,7 +62,36 @@ logger = get_logger("decoder")
 #: diacritic variants of the same word -- mò -> mo, ìlù -> ìlú, jé -> jẹ́,
 #: sílè -> sílẹ̀ -- rather than semantically wrong words, so the practical error
 #: rate is milder than the number suggests.
-DEFAULT_MARGIN = 2.0
+#: How far a candidate must outscore the prompted word before the engine names
+#: it. Lower means more substitutions get named; higher means fewer are named
+#: wrongly.
+#:
+#: Re-measured against the fine-tuned encoder's classifier:
+#:
+#:     margin   false substitutions   rate
+#:       1.0            124           6.3%
+#:       1.5             70           3.6%   <- here
+#:       2.0             46           2.3%
+#:       3.0             24           1.2%
+#:
+#: 2.0 was right for the previous classifier, which named a word confidently
+#: less often. This one is confident more often and correctly so -- median
+#: entropy fell from 0.07-0.17 to 0.04-0.06 -- so the same margin withholds
+#: names it could now safely give.
+#:
+#: It does not fix every unnamed substitution, and one worth recording is why.
+#: A learner reading ``òkun`` who says ``ọkun`` is flagged but never named, at
+#: any margin, because ``ọkun`` is not in the lexicon: it occurs zero times in
+#: 209,265 corpus tokens and appears in the dictionary only inside ``ọkunrin``.
+#: The decoder names real words, so declining to name one is correct there. The
+#: margin governs how often a *known* word gets named, not whether unknown ones
+#: can be.
+#:
+#: The cost is 1.3 more false namings per hundred. That is worth paying here and
+#: not elsewhere: a false naming arrives on a word already flagged as wrong, so
+#: it refines a correct verdict rather than inventing one, unlike a false
+#: omission which contradicts something the learner actually said.
+DEFAULT_MARGIN = 1.5
 
 #: Weight on the unigram prior, in the same log units as the acoustic score.
 #:

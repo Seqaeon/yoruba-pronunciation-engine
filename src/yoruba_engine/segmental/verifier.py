@@ -108,6 +108,24 @@ class SegmentalResult:
         return sum(not c.suspect for c in self.checks) / len(self.checks)
 
 
+def _checkpoint_for(metadata: dict) -> str:
+    """The encoder checkpoint a classifier was fitted to.
+
+    ``wav2vec_checkpoint`` is a local directory and is authoritative when
+    present. Classifiers trained before that field existed record only
+    ``wav2vec_model``, the upstream HuggingFace id, which means the unmodified
+    checkpoint rather than any locally fine-tuned one.
+    """
+    from .wav2vec import DEFAULT_MODEL, FALLBACK_MODEL  # noqa: PLC0415
+
+    recorded = metadata.get("wav2vec_checkpoint")
+    if recorded:
+        return str(recorded)
+    if metadata.get("wav2vec_model") == "LyngualLabs/mms-300m-yoruba-english":
+        return FALLBACK_MODEL
+    return DEFAULT_MODEL
+
+
 class VowelVerifier:
     """Checks aligned vowels against what the prompt requires."""
 
@@ -137,7 +155,14 @@ class VowelVerifier:
         if self.uses_wav2vec:
             from .wav2vec import Wav2VecExtractor  # noqa: PLC0415
 
+            # The classifier and the encoder are a matched pair: fine-tuning
+            # moves what the 1024 dimensions mean, so a classifier fitted to one
+            # encoder reads noise from another. The classifier therefore names
+            # the checkpoint it was fitted to, and that wins over any default --
+            # otherwise pointing the engine at a new encoder silently degrades
+            # every verdict, with nothing raising.
             self.wav2vec = Wav2VecExtractor(
+                model_path=_checkpoint_for(classifier.metadata),
                 layer=int(classifier.metadata.get("wav2vec_layer", 16)))
             if not self.wav2vec.available:
                 logger.warning(
