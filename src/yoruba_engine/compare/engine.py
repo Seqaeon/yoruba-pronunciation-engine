@@ -46,7 +46,29 @@ class WordAlignmentResult:
         return (self.substitutions + self.insertions + self.deletions) / self.total_reference
 
 
-def align_words(reference: list[str], learner: list[str]) -> WordAlignmentResult:
+def _collapse_repeats(word: str) -> str:
+    """Write each run of the same letter once: ``bii`` becomes ``bi``.
+
+    Yoruba writes a doubled vowel where two tone-bearing units share a quality,
+    and a recogniser will not reproduce that consistently -- Whisper returned
+    ``bí`` for ``bíi`` and ``ọkàn`` correctly in the same breath. Treating the
+    two spellings as different words reports a substitution the learner did not
+    make.
+
+    Only runs collapse. A substitution never does, which is what keeps this
+    safe: ``okun`` and ``okan`` differ by one letter and stay different, and
+    they are exactly the contrast the engine exists to catch. So does ``ẹ``
+    against ``e``, since the sub-dot is part of the letter rather than a repeat.
+    """
+    out: list[str] = []
+    for character in word:
+        if not out or out[-1] != character:
+            out.append(character)
+    return "".join(out)
+
+
+def align_words(reference: list[str], learner: list[str],
+                tolerate_spelling: bool = False) -> WordAlignmentResult:
     """Align two word sequences with Levenshtein distance.
 
     Words are compared tone-insensitively here: a tonal difference is a *tone*
@@ -56,12 +78,19 @@ def align_words(reference: list[str], learner: list[str]) -> WordAlignmentResult
     Args:
         reference: Reference word tokens.
         learner: Learner word tokens.
+        tolerate_spelling: Also ignore repeated letters, for transcripts that
+            came from a recogniser rather than from the prompt. Off by default,
+            so prompted practice keeps exact matching.
 
     Returns:
         The alignment, with ``None`` marking insertions and deletions.
     """
-    ref_keys = [strip_tones(w) for w in reference]
-    learner_keys = [strip_tones(w) for w in learner]
+    def key(word: str) -> str:
+        stripped = strip_tones(word)
+        return _collapse_repeats(stripped) if tolerate_spelling else stripped
+
+    ref_keys = [key(w) for w in reference]
+    learner_keys = [key(w) for w in learner]
 
     rows, cols = len(ref_keys) + 1, len(learner_keys) + 1
     cost = [[0] * cols for _ in range(rows)]
@@ -143,10 +172,14 @@ class ComparisonEngine:
         self,
         reference: UtteranceAnalysis,
         learner: UtteranceAnalysis,
+        tolerate_spelling: bool = False,
     ) -> ComparisonResult:
         """Produce the full scored comparison.
 
         Args:
+            tolerate_spelling: Ignore repeated letters when matching words.
+                Set for transcripts from a recogniser, whose spelling of a
+                correctly spoken word need not match the prompt's.
             reference: Analysed native-speaker rendition.
             learner: Analysed learner rendition.
 
@@ -177,7 +210,8 @@ class ComparisonEngine:
         reference_tokens = [w.word for w in reference_words]
         learner_tokens = [w.word for w in learner_words]
 
-        alignment = align_words(reference_tokens, learner_tokens)
+        alignment = align_words(reference_tokens, learner_tokens,
+                                tolerate_spelling=tolerate_spelling)
         text_similarity = max(0.0, 1.0 - alignment.error_rate)
 
         tone_comparison = self.tone_analyzer.compare(

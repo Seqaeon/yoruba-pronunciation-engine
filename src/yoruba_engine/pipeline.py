@@ -304,7 +304,13 @@ class AssessmentPipeline:
                                 "duration check says nothing was produced there",
                                 learner.utterance_id, prompted, decoded)
 
-        result = self.comparison_engine.compare(reference, learner)
+        # A recogniser's spelling of a correctly spoken word need not match the
+        # prompt's: Whisper wrote ``bí`` for ``bíi``, which is not an error the
+        # learner made. The prompted path keeps exact matching, where both
+        # sequences come from the same text and any difference is real.
+        result = self.comparison_engine.compare(
+            reference, learner,
+            tolerate_spelling=self.transcript_provider.recognizes_speech)
         result.utterance_id = utt_id
         result.undetected_words = dropped
         result.mispronounced_words = mispronounced

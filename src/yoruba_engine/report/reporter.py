@@ -32,6 +32,24 @@ def _serialize(obj: Any) -> Any:
     raise TypeError(f"Cannot serialize {type(obj).__name__}")
 
 
+def _same_word(reference: str | None, learner: str | None) -> bool:
+    """Whether two spellings name the same word, ignoring tone and repeats.
+
+    Matches the comparison the scorer performs, so the report cannot mark a
+    word DIFFERENT that the score counted as correct. Substitutions still
+    differ: ``òkun`` and ``ọkun`` collapse to ``okun`` and ``ọkun``, which are
+    not equal, because the sub-dot belongs to the letter rather than being a
+    repeat.
+    """
+    if not reference or not learner:
+        return False
+    from ..compare.engine import _collapse_repeats  # noqa: PLC0415
+    from ..g2p.orthography import strip_tones  # noqa: PLC0415
+
+    return (_collapse_repeats(strip_tones(reference))
+            == _collapse_repeats(strip_tones(learner)))
+
+
 def _expected_pattern(word) -> str:
     """The tones a word should carry, from its spelling.
 
@@ -161,6 +179,14 @@ class ReportGenerator:
                 shown = "(unclear)"
                 status = "CHECK VOWELS"
             elif ref_word == learner_word:
+                status = "ok"
+            elif _same_word(ref_word, learner_word):
+                # The scorer already counted these as the same word, and the
+                # status column must not contradict it. A recogniser writes
+                # ``bí`` where the prompt has ``bíi``; the learner said the word,
+                # and only the spelling of a repeated vowel differs. Tone marks
+                # differ freely here too -- a tonal error is reported in its own
+                # section rather than as a wrong word.
                 status = "ok"
             else:
                 status = "DIFFERENT"
