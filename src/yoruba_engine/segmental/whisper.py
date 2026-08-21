@@ -40,6 +40,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from ..audio import resample
 from ..exceptions import PitchExtractionError
 
 logger = logging.getLogger(__name__)
@@ -148,11 +149,7 @@ class WhisperExtractor:
         if getattr(samples, "ndim", 1) > 1:
             samples = samples.mean(axis=1)
         if rate != self.sample_rate_hz:
-            count = int(len(samples) / rate * self.sample_rate_hz)
-            samples = np.interp(
-                np.linspace(0, len(samples) - 1, count),
-                np.arange(len(samples)), samples,
-            ).astype("float32")
+            samples = resample(samples, rate, self.sample_rate_hz)
         if len(samples) < self.sample_rate_hz // 10:
             raise PitchExtractionError(f"{audio_path.name} is too short to analyse")
 

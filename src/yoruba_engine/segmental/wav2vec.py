@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..audio import resample
 from ..exceptions import PitchExtractionError
 from ..logging_utils import get_logger
 
@@ -205,11 +206,7 @@ class Wav2VecExtractor:
         if getattr(samples, "ndim", 1) > 1:
             samples = samples.mean(axis=1)
         if rate != self.sample_rate_hz:
-            count = int(len(samples) / rate * self.sample_rate_hz)
-            samples = np.interp(
-                np.linspace(0, len(samples) - 1, count),
-                np.arange(len(samples)), samples,
-            ).astype("float32")
+            samples = resample(samples, rate, self.sample_rate_hz)
         if len(samples) < self.sample_rate_hz // 10:
             raise PitchExtractionError(f"{audio_path.name} is too short to analyse")
 

@@ -418,8 +418,9 @@ class WhisperTranscriptProvider:
         model = self._load()
         torch = self._torch
         try:
-            import numpy as np  # noqa: PLC0415
             import soundfile as sf  # noqa: PLC0415
+
+            from ..audio import resample  # noqa: PLC0415
 
             samples, rate = sf.read(str(audio_path), dtype="float32", always_2d=False)
         except Exception as exc:
@@ -427,9 +428,7 @@ class WhisperTranscriptProvider:
         if getattr(samples, "ndim", 1) > 1:
             samples = samples.mean(axis=1)
         if rate != 16000:
-            count = int(len(samples) / rate * 16000)
-            samples = np.interp(np.linspace(0, len(samples) - 1, count),
-                                np.arange(len(samples)), samples).astype("float32")
+            samples = resample(samples, rate, 16000)
 
         features = self._processor(samples, sampling_rate=16000,
                                    return_tensors="pt").input_features

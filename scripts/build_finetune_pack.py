@@ -40,6 +40,7 @@ import soundfile as sf
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from yoruba_engine.audio import resample  # noqa: E402
 from yoruba_engine.alignment.textgrid import alignment_from_textgrid  # noqa: E402
 from yoruba_engine.pitch.extractor import is_vowel_phone  # noqa: E402
 
@@ -176,9 +177,7 @@ def main() -> int:
         if getattr(samples, "ndim", 1) > 1:
             samples = samples.mean(axis=1)
         if rate != RATE:
-            count = int(len(samples) / rate * RATE)
-            samples = np.interp(np.linspace(0, len(samples) - 1, count),
-                                np.arange(len(samples)), samples).astype("float32")
+            samples = resample(samples, rate, RATE)
 
         for label, speaker, _, start_s, end_s in rows:
             centre = int((start_s + end_s) / 2 * RATE)
