@@ -107,6 +107,10 @@ def download(url: str, destination: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--check", action="store_true", help="Verify without downloading")
+    parser.add_argument("--include-optional", action="store_true",
+                        help="Also fetch optional artifacts from HuggingFace. "
+                             "Currently the Whisper transcriber, 894 MB, "
+                             "needed only for --transcribe.")
     parser.add_argument("--repo", default=DEFAULT_REPO, help="GitHub owner/name")
     parser.add_argument("--tag", help="Release tag; defaults to the manifest's")
     parser.add_argument("--base-url", help="Override where assets are fetched from")
@@ -147,6 +151,39 @@ def main() -> int:
             state = verify(path, expected)
         statuses[relative] = state
         print(f"{relative:<40}{state:<13}{expected['bytes'] / 1e6:.1f} MB")
+
+    # Optional artifacts are archives: a Whisper checkpoint is a directory of
+    # weights, tokenizer and config, and a release asset is a single file.
+    for relative, spec in manifest.get("optional_artifacts", {}).items():
+        path = PROJECT_ROOT / relative
+        if (path / "config.json").exists():
+            print(f"{relative:<40}{'ok':<13}{spec['bytes'] / 1e6:.1f} MB")
+            continue
+        if not args.include_optional:
+            print(f"{relative:<40}{'optional':<13}--include-optional to fetch")
+            continue
+        if args.check:
+            print(f"{relative:<40}{'missing':<13}{spec['bytes'] / 1e6:.1f} MB")
+            continue
+
+        print(f"{relative:<40}{'fetching':<13}{spec['bytes'] / 1e6:.1f} MB")
+        archive = PROJECT_ROOT / "models" / spec["asset"]
+        if not download_with_gh(args.repo, tag, archive, asset=spec["asset"]):
+            try:
+                download(base + spec["asset"], archive)
+            except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+                print(f"  ! {exc}")
+                continue
+        if digest(archive) != spec["sha256"]:
+            print(f"  ! {spec['asset']} does not match its recorded sha256")
+            archive.unlink(missing_ok=True)
+            continue
+        import tarfile  # noqa: PLC0415
+
+        with tarfile.open(archive) as bundle:
+            bundle.extractall(PROJECT_ROOT / "models")
+        archive.unlink(missing_ok=True)
+        print(f"{relative:<40}{'ok':<13}extracted")
 
     # The dictionary is committed, so a mismatch means someone regenerated it --
     # and the acoustic model will not align against a changed phone set.

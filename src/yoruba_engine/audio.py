@@ -77,3 +77,48 @@ def read_mono(path: Path | str, target_rate: int = TARGET_RATE_HZ) -> np.ndarray
     if getattr(samples, "ndim", 1) > 1:
         samples = samples.mean(axis=1)
     return resample(samples, rate, target_rate)
+
+
+def trim_silence(samples: np.ndarray, rate: int = TARGET_RATE_HZ,
+                 margin_s: float = 0.15, floor: float = 0.02) -> np.ndarray:
+    """Remove dead air from the ends of a recording.
+
+    A recording made through a browser starts when the learner taps the button
+    and ends when they tap it again, so it carries silence at both ends that has
+    nothing to do with how they spoke. That silence is not harmless: the engine
+    checks what share of a recording the aligned words occupy, and treats a low
+    share as evidence the learner said something other than the prompt. One
+    second of silence at each end of a three-second phrase takes coverage from
+    58% to 34%, below the threshold, and the assessment is reported as
+    unverified with a zero score -- for a recording that was word-perfect.
+
+    Only the ends are trimmed. Silence *within* an utterance is real evidence
+    about how it was spoken, and removing it would hide hesitation the coverage
+    check is meant to notice.
+
+    Args:
+        samples: Mono audio.
+        rate: Its sample rate.
+        margin_s: Kept either side of the speech, so an onset is not clipped.
+        floor: Share of the loudest frame below which a frame counts as silent.
+
+    Returns:
+        The trimmed audio, or the original if no speech was found -- an empty
+        return would turn a quiet recording into a crash.
+    """
+    window = max(int(0.02 * rate), 1)
+    frames = len(samples) // window
+    if frames < 2:
+        return samples
+
+    energy = np.sqrt(np.mean(
+        samples[:frames * window].reshape(frames, window) ** 2, axis=1))
+    threshold = max(float(energy.max()) * floor, 1e-4)
+    voiced = np.flatnonzero(energy > threshold)
+    if len(voiced) == 0:
+        return samples
+
+    margin = int(margin_s * rate)
+    start = max(int(voiced[0]) * window - margin, 0)
+    end = min((int(voiced[-1]) + 1) * window + margin, len(samples))
+    return samples[start:end]

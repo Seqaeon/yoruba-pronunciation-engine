@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "release_tag": "v0.4.0",
+  "release_tag": "v0.5.0",
   "note": "Artifacts too large for git. Fetch with scripts/fetch_models.py. The calibration files committed in models/ (gop_reference.json, word_duration_stats.json) are measurements of THIS acoustic model's behaviour and are wrong for any other -- see acoustic_model_sha256. vowel_classifier.joblib additionally requires the wav2vec2 checkpoint; without it the engine disables vowel-identity checking rather than failing.",
   "artifacts": {
     "models/yoruba_acoustic.zip": {
@@ -9,20 +9,20 @@
       "purpose": "MFA acoustic model, trained on 193,309 utterances from 2,801 speakers (~118 h: SLR86, studio corpus, YECS). Everything else is calibrated against it."
     },
     "models/vowel_classifier.joblib": {
-      "bytes": 13523503,
-      "sha256": "2ac710834ba57368214b4bde019e5dc46de95f226dab66a90b6100104a117a1d",
-      "purpose": "Vowel identity classifier, 575,125 vowels from 2,786 speakers, fitted to models/finetuned_encoder. It names its own encoder in its metadata and the engine loads that, so the pair cannot drift."
+      "bytes": 9571749,
+      "sha256": "c85adf7ec1d78c439857e231d22521ec37f6303e47ae71056e457eadc5bc907e",
+      "purpose": "Vowel identity, 575,125 vowels from 2,786 speakers, fitted to models/finetuned_utterance. It names its encoder in its metadata and the engine loads that, so the pair cannot drift."
     },
     "models/tone_classifier.joblib": {
       "bytes": 2567144,
       "sha256": "b00861db9b5a657023dcff24c8404055f1573c292665033215e4cb49b54c51e9",
       "purpose": "Tone classifier, trained on this aligner's boundaries."
     },
-    "models/finetuned_encoder/model.safetensors": {
+    "models/finetuned_utterance/model.safetensors": {
+      "asset": "finetuned_utterance.safetensors",
       "bytes": 858709376,
-      "sha256": "d1f064f7489cc13ec38179bd99e44b85461088d41d8a55f7fd260d9689626fc3",
-      "purpose": "The encoder the vowel classifier is fitted to: LyngualLabs' mms-300m-yoruba-english fine-tuned here on 482,541 aligned Yoruba vowel windows and truncated to the 16 layers the engine reads. Required -- without it the engine falls back to the upstream checkpoint, whose features this classifier was not trained on.",
-      "asset": "finetuned_model.safetensors"
+      "sha256": "f82e02f1579d8e74ceeacd5e394409ee4bf2329002b15daf5323fe69ebfc2da9",
+      "purpose": "The encoder the vowel classifier is fitted to. LyngualLabs' mms-300m-yoruba-english fine-tuned on whole utterances and truncated to the 16 layers the engine reads. Required: the classifier reads noise from any other encoder."
     }
   },
   "acoustic_model_sha256": "92d13ef28b73319ae1c1ed2373832f7c66d6348fd10d12f7549edb2ec5f94f96",
@@ -40,8 +40,8 @@
     "wav2vec_model": "LyngualLabs/mms-300m-yoruba-english",
     "wav2vec_layer": 16,
     "training_vowels": 575125,
-    "holdout_accuracy": 0.9119,
-    "macro_f1": 0.8873,
+    "holdout_accuracy": 0.9312,
+    "macro_f1": 0.9125,
     "holdout_domain": "studio only (SLR86 + IroyinSpeech)",
     "speakers": 2786,
     "holdout_vowels": 29297,
@@ -52,16 +52,20 @@
       "macro_f1": 0.8112
     },
     "caveat": "Held-out composition changed between versions as more speakers entered the corpus, so figures are comparable only within a controlled comparison.",
-    "encoder": "models/finetuned_encoder (fine-tuned)",
+    "encoder": "models/finetuned_utterance (fine-tuned on whole utterances)",
     "controlled_comparison": {
-      "note": "Identical rows, identical classifier, identical speaker split; only the encoder differs.",
+      "note": "Identical rows, identical classifier, identical speaker split.",
       "frozen_upstream": {
-        "accuracy": 0.906,
         "macro_f1": 0.879
       },
-      "fine_tuned": {
-        "accuracy": 0.923,
+      "whisper_encoder": {
+        "macro_f1": 0.888
+      },
+      "fine_tuned_windows": {
         "macro_f1": 0.904
+      },
+      "fine_tuned_utterances": {
+        "macro_f1": 0.927
       }
     }
   },
@@ -102,5 +106,14 @@
     "max_vowel_entropy": 1.5,
     "min_duration_fraction": 0.7,
     "gop_threshold": -1.5
+  },
+  "optional_artifacts": {
+    "models/whisper-yoruba": {
+      "asset": "whisper-yoruba.tar.gz",
+      "archive": true,
+      "bytes": 894496704,
+      "sha256": "d0db25ba421e3a44dba111dbaf46bdfd610134365f9573d9d619eb477bb1fcce",
+      "purpose": "Whisper transcription for --transcribe, which recognises what a learner actually said and so names substituted words the 9,092-entry lexicon does not contain. Optional: prompted practice never loads it. Fetch with --include-optional."
+    }
   }
 }
