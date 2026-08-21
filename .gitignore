@@ -98,3 +98,8 @@ output/aligned_v3/
 models/whisper-yoruba/
 models/whisper_slices/
 models/whisper_tuned/
+models/finetuned_utterance/
+models/whisper_vowel_encoder/
+models/w2v_slices/
+models/w2v_slices_utt/
+Unsaved Document*
