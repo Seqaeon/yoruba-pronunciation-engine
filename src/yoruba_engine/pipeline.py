@@ -220,7 +220,7 @@ class AssessmentPipeline:
 
     def assess(
         self,
-        reference_audio: Path,
+        reference_audio: Path | None,
         learner_audio: Path,
         target_text: str,
         learner_text: str | None = None,
@@ -229,7 +229,11 @@ class AssessmentPipeline:
         """Compare a learner recording against a native reference.
 
         Args:
-            reference_audio: Native-speaker recording.
+            reference_audio: Native-speaker recording, or ``None`` to build the
+                reference from ``target_text`` alone. An application offering
+                arbitrary phrases cannot record a native speaker for each, and
+                Yoruba orthography specifies the tones, so the spelling is a
+                sufficient target.
             learner_audio: Learner recording.
             target_text: The diacritized text both speakers were producing.
             learner_text: What the learner actually said, if known. When omitted
@@ -240,11 +244,22 @@ class AssessmentPipeline:
         Returns:
             The scored comparison with feedback.
         """
-        utt_id = utterance_id or reference_audio.stem
+        utt_id = utterance_id or (
+            reference_audio.stem if reference_audio is not None else "prompt")
 
-        reference = self._analyse_reference(
-            reference_audio, target_text, utterance_id=f"{utt_id}_ref"
-        )
+        if reference_audio is None:
+            # No native recording for this prompt. The comparison never needed
+            # one: it reads the reference's words, their vowel counts and the
+            # transcript, and takes tone targets from the spelling rather than
+            # from a detector run over the reference. All of that is in the
+            # text. See yoruba_engine.textref.
+            from .textref import reference_from_text  # noqa: PLC0415
+
+            reference = reference_from_text(target_text, f"{utt_id}_ref")
+        else:
+            reference = self._analyse_reference(
+                reference_audio, target_text, utterance_id=f"{utt_id}_ref"
+            )
 
         if learner_text is None:
             learner_text = self.transcript_provider.transcribe(learner_audio, prompt=target_text)
