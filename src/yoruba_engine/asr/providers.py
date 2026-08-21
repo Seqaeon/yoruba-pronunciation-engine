@@ -363,6 +363,28 @@ class WhisperTranscriptProvider:
     def recognizes_speech(self) -> bool:
         return True
 
+    @property
+    def provides_tone_marks(self) -> bool:
+        """False -- it emits tone marks, but they cannot be trusted.
+
+        Whisper writes diacritics, and gets the ones that change a vowel's
+        identity right: it produced ``ọkàn`` and ``ọkún``, sub-dots intact. The
+        tone marks themselves drift -- ``àbùbùtàn`` for ``àbùbùtán``, ``ọkún``
+        for ``ọkun`` -- because tone is carried by pitch, which a transcriber
+        infers only indirectly.
+
+        This costs the engine nothing, because it does not read tone from the
+        transcript. Expected tone comes from the prompt's spelling and produced
+        tone from measured pitch, so Whisper's marks are discarded rather than
+        corrected. Alignment is unaffected too: the acoustic model has no tone
+        in its phones, so ``òkun`` and ``ókun`` yield the same phone sequence.
+
+        What remains true is that a misrecognised *word* shifts which vowel is
+        compared against which target, so the report says tone scoring is
+        approximate in this mode.
+        """
+        return False
+
     def _load(self):
         if self._model is not None:
             return self._model

@@ -93,7 +93,7 @@ class AssessmentPipeline:
         self.transcript_provider = transcript_provider or PromptedTranscriptProvider()
         self.word_decoder = self._load_word_decoder(self.vowel_verifier)
         self.gop_reference = self._load_gop_reference()
-        self._reference_cache = self._build_reference_cache()
+        self._reference_store = self._build_reference_cache()
 
 
     def _build_reference_cache(self):
@@ -202,7 +202,7 @@ class AssessmentPipeline:
         answer. The learner's recording still gets the full treatment; only the
         half that cannot have changed is reused.
         """
-        cache = self._reference_cache
+        cache = self._reference_store
         if cache is None:
             return self.analyse_utterance(audio_path, transcript,
                                           utterance_id=utterance_id)
@@ -256,13 +256,24 @@ class AssessmentPipeline:
         dropped: list[str] = []
         mispronounced: list[str] = []
         substitutions: dict[str, str] = {}
+        # GOP scores the acoustic model's fit to whatever text was aligned, so
+        # it is meaningful in both modes. It was previously computed only in
+        # prompted mode, which left it unbound the first time a recognising
+        # provider ran -- the branch had never been exercised, because until
+        # Whisper arrived every provider echoed the prompt back.
+        poorly = self._check_pronunciation(learner)
         if not self.transcript_provider.recognizes_speech:
             # Decode before dropping anything: a word the learner replaced is
             # still fully present in the audio, and calling it missing when we
             # can name what was said instead is the wrong feedback.
-            poorly = self._check_pronunciation(learner)
             substitutions = self._decode_words(learner)
             dropped = self._drop_unspoken_words(learner)
+            mispronounced = self._check_vowel_identity(learner)
+        else:
+            # In recognised mode the transcript already says which words were
+            # said, so omissions and substitutions come from comparing it with
+            # the prompt rather than from alignment quality. The vowel check
+            # still runs: it reports how a word that *was* said was produced.
             mispronounced = self._check_vowel_identity(learner)
 
             # A word that was not produced cannot have been said differently.
@@ -339,8 +350,10 @@ class AssessmentPipeline:
 
         if not self.transcript_provider.provides_tone_marks and learner_text != target_text:
             result.feedback.append(
-                "Note: the learner transcript came from a recognizer that does "
-                "not produce tone marks, so tone scoring is approximate."
+                "Note: what you said was recognised automatically. Tone is "
+                "measured from your pitch, not read from that transcript, but "
+                "a misheard word shifts which sounds are compared, so tone "
+                "scoring is approximate here."
             )
 
         self._reference_cache = reference  # exposed for report rendering

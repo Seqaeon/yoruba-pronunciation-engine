@@ -119,7 +119,20 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def cmd_assess(args: argparse.Namespace) -> int:
     """Stages 3-7: assess a learner recording against a reference."""
     config = _config_from_args(args)
-    pipeline = AssessmentPipeline(config)
+
+    # Forced alignment cannot report what a learner said, only how badly the
+    # prompt fits, so substitutions have to be recovered by matching vowels
+    # against a 9,092-entry dictionary. Whisper has no lexicon to be limited by:
+    # it named the substituted word in all four test recordings, including ọkun,
+    # which occurs zero times in 209,265 corpus tokens. It costs about 2.8 s on
+    # four CPU threads, and its tone marks are unreliable -- tone still comes
+    # from pitch, and vowel spans still from alignment.
+    provider = None
+    if getattr(args, "transcribe", False):
+        from .asr.providers import WhisperTranscriptProvider  # noqa: PLC0415
+
+        provider = WhisperTranscriptProvider()
+    pipeline = AssessmentPipeline(config, transcript_provider=provider)
 
     result, paths = pipeline.assess_and_report(
         reference_audio=Path(args.reference),
@@ -185,6 +198,11 @@ def build_parser() -> argparse.ArgumentParser:
     validate.set_defaults(func=cmd_validate)
 
     assess = subparsers.add_parser("assess", help="Stages 3-7: score a learner recording")
+    assess.add_argument(
+        "--transcribe", action="store_true",
+        help="Recognise what the learner actually said with Whisper, instead of "
+             "assuming they read the prompt. Names substituted words the "
+             "dictionary does not contain, at about 2.8 s per assessment.")
     assess.add_argument("--reference", required=True, help="Native-speaker audio")
     assess.add_argument("--learner", required=True, help="Learner audio")
     assess.add_argument("--text", required=True, help="Target text, with tone marks")

@@ -79,13 +79,28 @@ def align_words(reference: list[str], learner: list[str]) -> WordAlignmentResult
     matches = substitutions = insertions = deletions = 0
     i, j = len(ref_keys), len(learner_keys)
 
+    # Ties are common and the choice between them matters. Aligning
+    #
+    #     reference  abubutan  bii  omi  okun
+    #     learner    abubutan  omi  n    kun
+    #
+    # costs three either way: pair every position and substitute three times, or
+    # drop ``bii``, match ``omi`` against ``omi`` and substitute around it. The
+    # second is the true account -- the learner omitted a word -- and it finds
+    # two exact matches where the first finds one.
+    #
+    # A traceback that takes the diagonal first always picks the positional
+    # reading, which is harmless while the transcript is the prompt echoed back
+    # and both sequences match by construction, and wrong as soon as a
+    # recogniser returns what was really said. Taking the diagonal only when it
+    # is an exact match, and otherwise letting a gap absorb the cost, prefers
+    # the reading with more matches at no extra cost.
     while i > 0 or j > 0:
         if i > 0 and j > 0:
             same = ref_keys[i - 1] == learner_keys[j - 1]
-            if cost[i][j] == cost[i - 1][j - 1] + (not same):
+            if same and cost[i][j] == cost[i - 1][j - 1]:
                 pairs.append((i - 1, j - 1))
-                matches += same
-                substitutions += not same
+                matches += 1
                 i, j = i - 1, j - 1
                 continue
         if i > 0 and cost[i][j] == cost[i - 1][j] + 1:
@@ -93,9 +108,15 @@ def align_words(reference: list[str], learner: list[str]) -> WordAlignmentResult
             deletions += 1
             i -= 1
             continue
-        pairs.append((None, j - 1))
-        insertions += 1
-        j -= 1
+        if j > 0 and cost[i][j] == cost[i][j - 1] + 1:
+            pairs.append((None, j - 1))
+            insertions += 1
+            j -= 1
+            continue
+        # Nothing cheaper remains, so this is a genuine substitution.
+        pairs.append((i - 1, j - 1))
+        substitutions += 1
+        i, j = i - 1, j - 1
 
     pairs.reverse()
     return WordAlignmentResult(

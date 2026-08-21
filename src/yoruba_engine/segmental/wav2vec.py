@@ -49,20 +49,34 @@ FRAME_S = 0.02
 #: those away before the audio was ever seen.
 #: The encoder the engine reads its features from.
 #:
-#: ``models/finetuned_encoder`` is this project's own: LyngualLabs'
-#: ``mms-300m-yoruba-english`` fine-tuned on 482,541 aligned Yoruba vowel
-#: windows and truncated to the 16 layers actually consumed. Measured against
-#: the frozen upstream encoder on identical rows, identical classifier and
-#: identical speaker split, it lifts macro F1 from 0.879 to 0.904 and improves
-#: every one of the twelve classes -- most at ``in`` (0.755 to 0.834) and ``u``
-#: (0.805 to 0.856), which were the weakest.
+#: LyngualLabs' ``mms-300m-yoruba-english``, fine-tuned here on aligned Yoruba
+#: vowels and truncated to the 16 layers actually consumed. Measured against
+#: alternatives on identical rows, with the same classifier and speaker split,
+#: so only the encoder differs:
 #:
-#: ``models/lyngual-yoruba`` remains valid and is the fallback when the
-#: fine-tuned checkpoint is absent, so an install that has fetched only the
-#: upstream weights still runs.
-DEFAULT_MODEL = "models/finetuned_encoder"
+#:     encoder                              accuracy   macro F1
+#:     frozen upstream                        0.906      0.879
+#:     Whisper small yoruba                   0.912      0.888
+#:     fine-tuned on 0.4 s vowel windows      0.923      0.904
+#:     fine-tuned on whole utterances         0.939      0.927   <- here
+#:
+#: The last two differ only in what the encoder saw during fine-tuning. Windows
+#: were chosen so classes could be balanced by resampling, which whole
+#: utterances cannot do; they cost more than that bought. An utterance carries
+#: about fifteen labelled vowels against a window's one, so the same three
+#: epochs saw nearly twice the training signal, and the encoder saw real
+#: acoustic context rather than 400 ms around a vowel -- which is what inference
+#: presents.
+#:
+#: Whisper was measured because one model could have served both vowel identity
+#: and transcription, saving 850 MB and 3.2 s. At a 0.015 gap that trade looked
+#: worth taking; at 0.038 it does not. Whisper still provides the transcript,
+#: where being open-vocabulary lets it name words the 9,092-entry lexicon does
+#: not contain.
+DEFAULT_MODEL = "models/finetuned_utterance"
 
-#: Used when :data:`DEFAULT_MODEL` is not present.
+#: Named only so classifiers trained before the fine-tuned encoders can resolve
+#: what they were fitted to. It is no longer shipped.
 FALLBACK_MODEL = "models/lyngual-yoruba"
 
 #: Which hidden state to pool. Index 0 is the convolutional output, so layer 16
