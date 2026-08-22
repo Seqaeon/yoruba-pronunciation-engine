@@ -275,3 +275,8 @@ class ComparisonResult:
     verified: bool = True
     verification_note: str | None = None
     learner_speech_coverage: float | None = None
+
+    #: How much the recognised transcript sounds like the prompt, 0 to 1, when
+    #: a recogniser produced one. This is what decides ``verified`` in that
+    #: mode; ``learner_speech_coverage`` is still recorded but is not the gate.
+    learner_phrase_resemblance: float | None = None

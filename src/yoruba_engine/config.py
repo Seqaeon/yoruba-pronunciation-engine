@@ -239,14 +239,47 @@ class ScoringConfig:
     #: probably said something other than the prompt, and the scores describe a
     #: forced fit rather than a real match.
     #:
-    #: Measured on the training corpus, correct alignments cover 40-92% of the
-    #: audio (1st-95th percentile, median 69%), while alignments forced against
-    #: the wrong text cover 22-53% (median 32%). The two distributions overlap,
-    #: so this check is a partial safeguard, not a solved problem: at 0.35 it
-    #: caught roughly half of deliberately mismatched utterances with under 1%
-    #: false rejections. Raise it to catch more at the cost of failing genuine
-    #: attempts; lower it to be more permissive.
+    #: Measured on 120 corpus utterances aligned twice -- against their own
+    #: transcript and against another utterance's -- correct alignments cover a
+    #: median 64% of the audio and mismatched ones 54%. The distributions
+    #: overlap heavily: at 0.35 this catches only 12% of deliberately
+    #: mismatched utterances, and no threshold does better than 72% balanced
+    #: accuracy. Raising it trades false confidence for false accusations --
+    #: 0.50 catches 43% but wrongly fails 16% of genuine attempts.
+    #:
+    #: **This is a weak check and it is now the fallback, not the primary one.**
+    #: It is a proxy for a question a recogniser answers directly, so when the
+    #: transcript provider recognises speech the engine gates on
+    #: ``min_recognised_similarity`` instead. This value applies only in
+    #: prompted mode, where the transcript is the prompt echoed back and there
+    #: is no other evidence available.
+    #:
+    #: It is also sensitive to dead air, because the denominator is the whole
+    #: file: silence a learner leaves at either end counts against them. That is
+    #: why browser recordings are trimmed before assessment.
     min_speech_coverage: float = 0.35
+
+    #: How much a recognised transcript must sound like the prompt before the
+    #: attempt counts as an attempt at that phrase at all.
+    #:
+    #: This replaces the coverage proxy whenever a real recogniser supplied the
+    #: transcript. "Did the learner try to say this phrase?" is what recognition
+    #: answers directly, where alignment coverage only ever circled it.
+    #:
+    #: Compared as characters with tone marks stripped, not as words -- see
+    #: :func:`~yoruba_engine.compare.engine.phrase_resemblance` for why. A
+    #: learner who mangles every word is still attempting the prompt; word-level
+    #: agreement puts them in the same range as someone reading a different
+    #: phrase, and character-level agreement separates them.
+    #:
+    #: Set in the middle of a measured gap: genuine attempts scored 0.67-0.97
+    #: and different phrases 0.13-0.43. That is four recordings by one speaker
+    #: against eight unrelated phrases, so it is a provisional threshold on a
+    #: wide gap, not a tuned one on a narrow one.
+    #:
+    #: This is not a grade. It asks only whether the learner attempted the
+    #: prompt, so a poor but genuine attempt must clear it comfortably.
+    min_phrase_resemblance: float = 0.55
 
     #: How short a word may be, relative to the 5th-percentile duration for its
     #: length, and still count as actually spoken.

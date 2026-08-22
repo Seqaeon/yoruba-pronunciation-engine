@@ -167,18 +167,32 @@ class TestVerification:
         analysis.speech_coverage = coverage
         return analysis
 
-    def _pipeline(self):
+    def _pipeline(self, recognizes: bool = False):
+        """A pipeline with only what ``_verify_attempt`` reads.
+
+        ``recognizes`` selects which evidence the check uses: a recogniser makes
+        it compare the heard words with the prompt, and its absence falls back
+        to alignment coverage.
+        """
+        from yoruba_engine.config import EngineConfig
         from yoruba_engine.pipeline import AssessmentPipeline
+        from yoruba_engine.asr.providers import (
+            ASRTranscriptProvider, PromptedTranscriptProvider,
+        )
 
         # No MFA or model needed: only _verify_attempt is exercised.
-        return AssessmentPipeline.__new__(AssessmentPipeline)
+        pipeline = AssessmentPipeline.__new__(AssessmentPipeline)
+        pipeline.config = EngineConfig()
+        pipeline.transcript_provider = (
+            ASRTranscriptProvider() if recognizes else PromptedTranscriptProvider()
+        )
+        return pipeline
 
     def test_low_coverage_marks_the_attempt_unverified(self):
         from yoruba_engine.config import EngineConfig
         from yoruba_engine.pipeline import AssessmentPipeline
 
         pipeline = self._pipeline()
-        pipeline.config = EngineConfig()
 
         reference = self._analysis("ref", [("òrí", [-4.0, 4.0])], 0.7)
         learner = self._analysis("learner", [("òrí", [-4.0, 4.0])], 0.10)
@@ -197,7 +211,6 @@ class TestVerification:
         from yoruba_engine.pipeline import AssessmentPipeline
 
         pipeline = self._pipeline()
-        pipeline.config = EngineConfig()
 
         reference = self._analysis("ref", [("òrí", [-4.0, 4.0])], 0.7)
         learner = self._analysis("learner", [("òrí", [-4.0, 4.0])], 0.7)
@@ -215,7 +228,6 @@ class TestVerification:
         from yoruba_engine.pipeline import AssessmentPipeline
 
         pipeline = self._pipeline()
-        pipeline.config = EngineConfig()
 
         reference = self._analysis("ref", [("òrí", [-4.0, 4.0])], 0.7)
         learner = self._analysis("learner", [("òrí", [-4.0, 4.0])], None)
@@ -223,3 +235,98 @@ class TestVerification:
 
         AssessmentPipeline._verify_attempt(pipeline, result, learner)
         assert result.verified is True
+
+    def test_recognised_transcript_gates_on_words_not_coverage(self):
+        """With a recogniser, low coverage is not evidence of a wrong phrase.
+
+        A learner who leaves silence at either end produces low coverage while
+        saying exactly the right words. Before recognition that was
+        indistinguishable from saying something else; now it is not, and the
+        attempt must survive.
+        """
+        from yoruba_engine.pipeline import AssessmentPipeline
+
+        pipeline = self._pipeline(recognizes=True)
+
+        reference = self._analysis("ref", [("òrí", [-4.0, 4.0])], 0.7)
+        learner = self._analysis("learner", [("òrí", [-4.0, 4.0])], 0.10)
+        result = ComparisonEngine().compare(reference, learner)
+
+        AssessmentPipeline._verify_attempt(pipeline, result, learner)
+
+        assert result.verified is True
+        assert result.overall_score == 1.0
+        # Still reported, even though it did not decide the outcome.
+        assert result.learner_speech_coverage == 0.10
+
+    def test_recognised_transcript_rejects_a_different_phrase(self):
+        """Words that are not the prompt's fail, however well they align."""
+        from yoruba_engine.pipeline import AssessmentPipeline
+
+        pipeline = self._pipeline(recognizes=True)
+
+        reference = self._analysis("ref", [("òrí", [-4.0, 4.0]), ("omi", [0.0, 0.0])], 0.7)
+        learner = self._analysis("learner", [("bàbá", [-4.0, 4.0]), ("ilé", [0.0, 0.0])], 0.7)
+        result = ComparisonEngine().compare(reference, learner)
+        assert result.text_similarity < 0.4
+
+        AssessmentPipeline._verify_attempt(pipeline, result, learner)
+
+        assert result.verified is False
+        assert result.overall_score == 0.0
+        assert "could not confirm" in result.feedback[0].lower()
+
+    def test_a_mangled_attempt_is_still_an_attempt(self):
+        """Every word wrong is not the same as reading a different phrase.
+
+        A real recognition of a genuine attempt at 'àbùbùtán bíi omi òkun' came
+        back as 'àbògùtàn omi ọkàn': one word of four. Gating on word agreement
+        scored that 0.25 and withheld the score, telling a learner who had
+        attempted the prompt that they had not -- which is both false and the
+        opposite of useful. It must verify.
+        """
+        from yoruba_engine.pipeline import AssessmentPipeline
+
+        pipeline = self._pipeline(recognizes=True)
+
+        result = ComparisonEngine().compare(
+            self._analysis("ref", [("òrí", [-4.0, 4.0])], 0.7),
+            self._analysis("learner", [("òrí", [-4.0, 4.0])], 0.7),
+        )
+        result.reference_transcript = "àbùbùtán bíi omi òkun"
+        result.learner_transcript = "àbògùtàn omi ọkàn"
+
+        AssessmentPipeline._verify_attempt(
+            pipeline, result, self._analysis("learner", [("òrí", [-4.0, 4.0])], 0.7))
+
+        assert result.verified is True
+        assert result.overall_score == 1.0
+
+
+class TestPhraseResemblance:
+    """Distinguishing 'said it badly' from 'said something else'."""
+
+    def test_a_mangled_rendition_still_resembles_the_prompt(self):
+        from yoruba_engine.compare.engine import phrase_resemblance
+
+        assert phrase_resemblance(
+            "àbùbùtán bíi omi òkun", "àbògùtàn omi ọkàn") > 0.6
+
+    def test_a_different_phrase_does_not(self):
+        from yoruba_engine.compare.engine import phrase_resemblance
+
+        assert phrase_resemblance(
+            "Ẹ káàbọ̀", "àbùbùtàn bí omi òkun") < 0.5
+
+    def test_tone_marks_do_not_count_against_the_learner(self):
+        """The recogniser's tone marks drift; a tone error is reported
+        separately, not read as a different phrase."""
+        from yoruba_engine.compare.engine import phrase_resemblance
+
+        assert phrase_resemblance("àbùbùtán", "àbùbùtàn") == 1.0
+
+    def test_an_empty_transcript_resembles_nothing(self):
+        from yoruba_engine.compare.engine import phrase_resemblance
+
+        assert phrase_resemblance("Ẹ káàbọ̀", "") == 0.0
+

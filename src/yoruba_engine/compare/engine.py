@@ -46,6 +46,50 @@ class WordAlignmentResult:
         return (self.substitutions + self.insertions + self.deletions) / self.total_reference
 
 
+def phrase_resemblance(prompt: str, heard: str) -> float:
+    """How much a recognised transcript sounds like the prompt, 0 to 1.
+
+    This answers a narrower question than :func:`text similarity
+    <ComparisonEngine>`: not "how many words were right" but "was this an
+    attempt at this phrase at all". The two must not be confused, because a
+    learner who mangles every word is still attempting the prompt and must be
+    coached, not accused of reading something else.
+
+    Word-level agreement cannot make that distinction. A genuine attempt at
+    ``àbùbùtán bíi omi òkun`` came back from the recogniser as ``àbògùtàn omi
+    ọkàn``: one word of four matches exactly, which scores 0.25 -- the same
+    range a completely different phrase scores. Compared as characters with
+    tone marks removed, the same pair scores 0.67, because the sounds are
+    nearly all there in nearly the right order.
+
+    Measured on the project's four attempt recordings against their prompt, and
+    on the same recognitions against eight unrelated app phrases:
+
+        genuine attempts   0.67 - 0.97
+        different phrases  0.13 - 0.43
+
+    That is a wide gap, but it comes from four recordings by one speaker, so
+    treat the threshold as provisional rather than tuned.
+
+    Tone marks are stripped because the recogniser's are unreliable -- it writes
+    ``àbùbùtàn`` for ``àbùbùtán`` -- and a tone error is reported in its own
+    section rather than being read as a different phrase. Spaces are dropped
+    because word boundaries are exactly what a recogniser gets wrong when a
+    learner runs words together.
+    """
+    from difflib import SequenceMatcher  # noqa: PLC0415
+
+    from ..g2p.orthography import normalize  # noqa: PLC0415
+
+    def key(text: str) -> str:
+        return strip_tones(normalize(text or "")).replace(" ", "")
+
+    left, right = key(prompt), key(heard)
+    if not left or not right:
+        return 0.0
+    return SequenceMatcher(None, left, right).ratio()
+
+
 def _collapse_repeats(word: str) -> str:
     """Write each run of the same letter once: ``bii`` becomes ``bi``.
 

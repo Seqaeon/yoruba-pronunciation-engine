@@ -65,6 +65,89 @@ def _expected_pattern(word) -> str:
     return word.pattern_string()
 
 
+def alignment_rows(result: ComparisonResult) -> list[dict[str, str | None]]:
+    """The word-alignment table, as rows of reference, learner and status.
+
+    Both the text report and the JSON payload render this table, and they were
+    computing it separately: the report derived a status column while the
+    payload emitted bare word pairs, leaving any consumer of the JSON -- the
+    app's practice screen among them -- to reimplement the rules and get a
+    different answer. Deriving both from one function is what keeps the screen
+    and the report describing the same assessment.
+
+    ``learner`` is what to show in that column, which is not always the aligned
+    token: a substituted word shows what the learner actually said, and a word
+    the vowel check flagged shows ``(unclear)``, because printing the prompt
+    word there would claim the learner produced it.
+    """
+    # A word the acoustic model fitted badly must not print as "ok" -- that is
+    # exactly the case the vowel check cannot see. Words the duration check says
+    # were never produced are excluded: they are reported as NOT SAID.
+    unspoken = set(result.undetected_words)
+    flagged_by_gop = [w for w in result.poorly_pronounced if w not in unspoken]
+
+    rows: list[dict[str, str | None]] = []
+    for ref_word, learner_word in result.word_pairs:
+        shown = learner_word
+        if ref_word is None:
+            status = "INSERTED"
+        elif learner_word is None:
+            # Only duration evidence says a word was absent. A word the vowel
+            # check flagged is present but wrong, and saying it was missing
+            # tells the learner to repeat something they did say.
+            status = "NOT SAID"
+        elif ref_word in result.substitutions:
+            shown = result.substitutions[ref_word]
+            status = "SAID DIFFERENTLY"
+        elif ref_word in result.mispronounced_words or ref_word in flagged_by_gop:
+            shown = "(unclear)"
+            status = "CHECK VOWELS"
+        elif ref_word == learner_word:
+            status = "ok"
+        elif _same_word(ref_word, learner_word):
+            # The scorer already counted these as the same word, and the status
+            # column must not contradict it. A recogniser writes ``bí`` where
+            # the prompt has ``bíi``; the learner said the word, and only the
+            # spelling of a repeated vowel differs. Tone marks differ freely
+            # here too -- a tonal error is reported in its own section rather
+            # than as a wrong word.
+            status = "ok"
+        else:
+            status = "DIFFERENT"
+        rows.append({"reference": ref_word, "learner": shown, "status": status})
+    return rows
+
+
+def tone_pattern_rows(
+    reference: UtteranceAnalysis,
+    learner: UtteranceAnalysis,
+    result: ComparisonResult | None = None,
+) -> list[dict]:
+    """The tone-pattern table: one row per prompt word.
+
+    ``expected`` is what the word is *spelled* with, not what a detector made of
+    a reference recording. Showing the latter was actively misleading --
+    ``àbùbùtán`` is spelled Low-Low-Low-High and the column read ``Low-Mid-?-?``,
+    so a learner comparing the two columns was shown the detector's own failure
+    as though it were the goal.
+    """
+    rows = []
+    for ref_word, learner_word in _speech_pairs(reference, learner, result):
+        rows.append({
+            "word": ref_word.word,
+            "expected": _expected_pattern(ref_word).split("-"),
+            "detected": (
+                [_TONE_NAMES[t] for t in learner_word.tone_pattern]
+                if learner_word is not None else None
+            ),
+            "confidences": (
+                [round(v.confidence, 3) for v in learner_word.vowels]
+                if learner_word is not None else []
+            ),
+        })
+    return rows
+
+
 def _speech_pairs(
     reference: UtteranceAnalysis,
     learner: UtteranceAnalysis,
@@ -140,9 +223,9 @@ class ReportGenerator:
                 "",
             ])
 
-        # Which words the acoustic model fitted badly. Needed before the word
-        # alignment table, because a word GOP scores at -4.8 must not print as
-        # "ok" -- that is the case the vowel check cannot see.
+        # Which words the acoustic model fitted badly, for the sections below.
+        # ``alignment_rows`` derives this itself; the WORDS TO CHECK section
+        # further down still needs it here.
         unspoken = {w for w in result.undetected_words}
         flagged_by_gop = [w for w in result.poorly_pronounced if w not in unspoken]
 
@@ -160,54 +243,20 @@ class ReportGenerator:
             f"{'REFERENCE':<24} {'LEARNER':<24} {'STATUS'}",
         ])
 
-        for ref_word, learner_word in result.word_pairs:
-            shown = learner_word
-            if ref_word is None:
-                status = "INSERTED"
-            elif learner_word is None:
-                # Only duration evidence says a word was absent. A word the
-                # vowel check flagged is present but wrong, and saying it was
-                # missing tells the learner to repeat something they did say.
-                status = "NOT SAID"
-            elif ref_word in result.substitutions:
-                shown = result.substitutions[ref_word]
-                status = "SAID DIFFERENTLY"
-            elif ref_word in result.mispronounced_words or ref_word in flagged_by_gop:
-                # Showing the prompt word here would claim the learner produced
-                # it, next to a warning saying they may not have. We know a word
-                # was spoken in that slot but not which one.
-                shown = "(unclear)"
-                status = "CHECK VOWELS"
-            elif ref_word == learner_word:
-                status = "ok"
-            elif _same_word(ref_word, learner_word):
-                # The scorer already counted these as the same word, and the
-                # status column must not contradict it. A recogniser writes
-                # ``bí`` where the prompt has ``bíi``; the learner said the word,
-                # and only the spelling of a repeated vowel differs. Tone marks
-                # differ freely here too -- a tonal error is reported in its own
-                # section rather than as a wrong word.
-                status = "ok"
-            else:
-                status = "DIFFERENT"
-            lines.append(f"{ref_word or '-':<24} {shown or '-':<24} {status}")
+        for row in alignment_rows(result):
+            lines.append(
+                f"{row['reference'] or '-':<24} {row['learner'] or '-':<24} {row['status']}"
+            )
 
         if reference is not None and learner is not None:
             lines.extend(["", "TONE PATTERNS", "-" * 62])
             lines.append(f"{'WORD':<20} {'EXPECTED':<20} {'DETECTED':<20}")
-            for ref_word, learner_word in _speech_pairs(reference, learner, result):
+            for row in tone_pattern_rows(reference, learner, result):
                 detected = (
-                    learner_word.pattern_string() if learner_word is not None
-                    else "(not detected)"
+                    "-".join(row["detected"]) if row["detected"] else "(not detected)"
                 )
-                # The target is what the word is SPELLED with, not what the
-                # detector made of the reference recording. Showing the latter
-                # was actively misleading: àbùbùtán is spelled Low-Low-Low-High
-                # and the column read "Low-Mid-?-?", so a learner comparing the
-                # two columns was being shown the detector's own failure as
-                # though it were the goal.
-                expected = _expected_pattern(ref_word)
-                lines.append(f"{ref_word.word:<20} {expected:<20} {detected:<20}")
+                expected = "-".join(row["expected"])
+                lines.append(f"{row['word']:<20} {expected:<20} {detected:<20}")
 
         # Goodness-of-Pronunciation is a diagnostic signal, not feedback. Two
         # reasons it is not shown as its own section:
@@ -294,6 +343,12 @@ class ReportGenerator:
                     round(result.learner_speech_coverage, 4)
                     if result.learner_speech_coverage is not None else None
                 ),
+                # Which of the two decided the outcome depends on whether a
+                # recogniser ran; both are reported so a reader can see why.
+                "phrase_resemblance": (
+                    round(result.learner_phrase_resemblance, 4)
+                    if result.learner_phrase_resemblance is not None else None
+                ),
             },
             "scores": {
                 "text_similarity": (
@@ -303,10 +358,11 @@ class ReportGenerator:
                 "tone_similarity": round(result.tone_similarity, 4),
                 "overall": round(result.overall_score, 4),
             },
-            "word_alignment": [
-                {"reference": ref, "learner": learner_word}
-                for ref, learner_word in result.word_pairs
-            ],
+            # Rows of reference, learner and status -- the same table the text
+            # report prints. The payload used to emit bare word pairs, leaving
+            # every consumer to reimplement the status rules; the app's practice
+            # screen did, and got a different answer.
+            "word_alignment": alignment_rows(result),
             "tone_errors": [
                 {
                     "word": error.word,
@@ -326,21 +382,7 @@ class ReportGenerator:
         }
 
         if reference is not None and learner is not None:
-            payload["tone_patterns"] = [
-                {
-                    "word": ref_word.word,
-                    "expected": _expected_pattern(ref_word).split("-"),
-                    "detected": (
-                        [_TONE_NAMES[t] for t in learner_word.tone_pattern]
-                        if learner_word is not None else None
-                    ),
-                    "confidences": (
-                        [round(v.confidence, 3) for v in learner_word.vowels]
-                        if learner_word is not None else []
-                    ),
-                }
-                for ref_word, learner_word in _speech_pairs(reference, learner, result)
-            ]
+            payload["tone_patterns"] = tone_pattern_rows(reference, learner, result)
 
         return payload
 

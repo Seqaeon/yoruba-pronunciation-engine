@@ -615,22 +615,66 @@ class AssessmentPipeline:
         text, so without this check a learner who said something entirely
         different is compared against the target and scores 100%.
 
-        The tell is coverage. When the text matches the audio the aligned words
-        account for most of the recording; when it does not, the aligner crams
-        them into a fraction of it and leaves the rest as silence.
+        **How that is checked depends on what evidence exists.**
 
-        **This catches roughly half of mismatched attempts, not all of them.**
-        Measured on the training corpus, correct alignments cover 40-92% of the
-        audio and mismatched ones 22-53%, so the distributions overlap. A learner
-        who says a different phrase of similar length may still pass. Treat a
-        passing result as "not obviously wrong", not as proof of correctness.
+        When a recogniser supplied the transcript, the question is answered
+        directly -- word overlap between what was heard and what was prompted.
+        That is what recognition is for.
 
-        A likelihood-based check would be stronger, but MFA does not expose
-        per-utterance acoustic scores through its command-line interface.
+        Otherwise the only evidence is circumstantial: how much of the recording
+        the aligned words occupy. When the text matches the audio the words
+        account for most of it; when it does not, the aligner crams them into a
+        fraction and leaves the rest as silence. Measured on 120 utterances
+        aligned both ways, that proxy reaches 72% balanced accuracy at best and
+        catches 12% of mismatches at the shipped threshold, so a passing result
+        means "not obviously wrong", not "correct".
+
+        Coverage is recorded either way, because it is worth reporting even when
+        it is not what decided the outcome.
         """
-        coverage = learner.speech_coverage
-        result.learner_speech_coverage = coverage
+        result.learner_speech_coverage = learner.speech_coverage
 
+        if self.transcript_provider.recognizes_speech:
+            self._verify_by_recognition(result)
+        else:
+            self._verify_by_coverage(result)
+
+    def _verify_by_recognition(self, result: ComparisonResult) -> None:
+        """Reject an attempt that does not sound like the prompt at all.
+
+        Deliberately not gated on word agreement. A learner whose every word
+        came back wrong is the learner this app exists for, and telling them
+        "we could not confirm you said the prompt" is both false and useless
+        feedback. What disqualifies an attempt is sounding like a *different*
+        phrase, which character-level resemblance separates cleanly and word
+        agreement does not.
+        """
+        from .compare.engine import phrase_resemblance  # noqa: PLC0415
+
+        resemblance = phrase_resemblance(
+            result.reference_transcript, result.learner_transcript)
+        result.learner_phrase_resemblance = resemblance
+        if resemblance >= self.config.scoring.min_phrase_resemblance:
+            return
+
+        result.verified = False
+        result.verification_note = (
+            f"What we heard does not sound like this phrase: it came back as "
+            f"{result.learner_transcript!r}, which resembles the prompt "
+            f"{resemblance:.0%} (expected at least "
+            f"{self.config.scoring.min_phrase_resemblance:.0%}). The scores "
+            "below describe a forced fit rather than a real match."
+        )
+        self._withhold_score(result)
+        logger.warning(
+            "Utterance %s failed verification: phrase resemblance %.2f (%r vs %r)",
+            result.utterance_id, resemblance,
+            result.reference_transcript, result.learner_transcript,
+        )
+
+    def _verify_by_coverage(self, result: ComparisonResult) -> None:
+        """Reject an attempt whose aligned words occupy too little of the audio."""
+        coverage = result.learner_speech_coverage
         if coverage is None or coverage >= self.config.scoring.min_speech_coverage:
             return
 
@@ -641,7 +685,15 @@ class AssessmentPipeline:
             "The learner probably said something other than the prompt, so the "
             "scores below describe a forced fit rather than a real match."
         )
-        # Do not present a forced fit as an achievement.
+        self._withhold_score(result)
+        logger.warning(
+            "Utterance %s failed verification: coverage %.2f",
+            result.utterance_id, coverage,
+        )
+
+    @staticmethod
+    def _withhold_score(result: ComparisonResult) -> None:
+        """Zero the score and say what to do, without presenting a forced fit."""
         result.overall_score = 0.0
         result.feedback = [
             "We could not confirm you said the prompt. Listen to the reference "
@@ -649,9 +701,6 @@ class AssessmentPipeline:
             "If you did say it, try recording in a quieter place, and avoid long "
             "pauses or extra words before and after.",
         ]
-        logger.warning(
-            "Utterance %s failed verification: coverage %.2f", result.utterance_id, coverage
-        )
 
     def assess_and_report(
         self,

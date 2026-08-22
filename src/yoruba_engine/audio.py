@@ -80,27 +80,39 @@ def read_mono(path: Path | str, target_rate: int = TARGET_RATE_HZ) -> np.ndarray
 
 
 def trim_silence(samples: np.ndarray, rate: int = TARGET_RATE_HZ,
-                 margin_s: float = 0.15, floor: float = 0.02) -> np.ndarray:
+                 margin_s: float = 0.15, headroom_db: float = 10.0) -> np.ndarray:
     """Remove dead air from the ends of a recording.
 
     A recording made through a browser starts when the learner taps the button
     and ends when they tap it again, so it carries silence at both ends that has
-    nothing to do with how they spoke. That silence is not harmless: the engine
-    checks what share of a recording the aligned words occupy, and treats a low
-    share as evidence the learner said something other than the prompt. One
-    second of silence at each end of a three-second phrase takes coverage from
-    58% to 34%, below the threshold, and the assessment is reported as
-    unverified with a zero score -- for a recording that was word-perfect.
+    nothing to do with how they spoke. Removing it matters for two reasons: the
+    prompted-mode coverage check divides aligned speech by the *whole file*, so
+    dead air counts against a learner who did nothing wrong, and every second
+    kept is a second forced alignment and the encoder have to process.
+
+    **The threshold is relative to the recording's own noise floor, not its
+    peak.** A peak-relative floor is what broke this: the previous version
+    trimmed frames quieter than 2% of the loudest one, which is -34 dB, and
+    ordinary room noise sits above that. On a laptop microphone nothing was
+    trimmed at all -- a padded 6.08 s recording came back as 6.08 s -- so the
+    dead air survived and a word-perfect attempt was reported unverified. The
+    same recordings now trim to 1.9-3.6 s across noise floors from -60 to
+    -25 dB relative to peak.
+
+    The cost of a noise-relative threshold is that a very noisy recording
+    over-trims: at -25 dB the quietest edges of speech fall below the floor and
+    about 0.8 s is lost. ``margin_s`` covers the ordinary case, and losing a
+    quiet edge is a better failure than keeping four seconds of hiss.
 
     Only the ends are trimmed. Silence *within* an utterance is real evidence
-    about how it was spoken, and removing it would hide hesitation the coverage
-    check is meant to notice.
+    about how it was spoken, and removing it would hide hesitation.
 
     Args:
         samples: Mono audio.
         rate: Its sample rate.
         margin_s: Kept either side of the speech, so an onset is not clipped.
-        floor: Share of the loudest frame below which a frame counts as silent.
+        headroom_db: How far above the noise floor a frame must be to count as
+            speech.
 
     Returns:
         The trimmed audio, or the original if no speech was found -- an empty
@@ -113,8 +125,17 @@ def trim_silence(samples: np.ndarray, rate: int = TARGET_RATE_HZ,
 
     energy = np.sqrt(np.mean(
         samples[:frames * window].reshape(frames, window) ** 2, axis=1))
-    threshold = max(float(energy.max()) * floor, 1e-4)
-    voiced = np.flatnonzero(energy > threshold)
+    level_db = 20 * np.log10(np.maximum(energy, 1e-9))
+
+    # The 10th percentile is the noise floor when the recording contains any
+    # silence at all. When it does not, that percentile is a quiet speech frame
+    # instead, so the threshold is also capped 15 dB below the loudest frame --
+    # without the cap, a recording that is speech end to end would be trimmed
+    # to its loudest syllable.
+    floor_db = float(np.percentile(level_db, 10))
+    threshold_db = min(floor_db + headroom_db, float(level_db.max()) - 15.0)
+
+    voiced = np.flatnonzero(level_db > threshold_db)
     if len(voiced) == 0:
         return samples
 
