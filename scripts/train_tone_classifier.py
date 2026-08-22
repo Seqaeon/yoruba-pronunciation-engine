@@ -59,7 +59,8 @@ from yoruba_engine.tone.features import (  # noqa: E402
 logger = get_logger("train_tone")
 
 
-def collect(config: EngineConfig, aligned_dir: Path, limit: int | None):
+def collect(config: EngineConfig, aligned_dir: Path, limit: int | None,
+            corpus_dir: Path | None = None):
     """Build the training set from aligned utterances.
 
     Returns:
@@ -70,8 +71,33 @@ def collect(config: EngineConfig, aligned_dir: Path, limit: int | None):
     orthography disagree about syllable count, so the label cannot be trusted to
     belong to that vowel.
     """
-    report = DatasetAuditor(config).audit()
-    by_id = {utterance.utterance_id: utterance for utterance in report.matched}
+    if corpus_dir is not None:
+        # An MFA-format corpus: paired .wav and .lab, which is what the 118 h
+        # training corpus is. The auditor reads config.corpus_dir instead, which
+        # is SLR86 -- 36 speakers -- so this classifier was fitted on 49,531
+        # vowels from 36 voices while the acoustic model and vowel classifier
+        # were retrained on 2,801. Pointing --aligned at the larger set was not
+        # enough on its own: nothing matched, because the transcripts came from
+        # somewhere else.
+        from types import SimpleNamespace  # noqa: PLC0415
+
+        by_id = {}
+        for lab in corpus_dir.rglob("*.lab"):
+            wav = lab.with_suffix(".wav")
+            if not wav.exists():
+                continue
+            text = lab.read_text(encoding="utf-8").strip()
+            if text:
+                # The speaker is the directory, which is how the corpus is laid
+                # out and what the held-out split must be drawn on: this
+                # classifier is asked to read a voice it has never heard.
+                by_id[lab.stem] = SimpleNamespace(
+                    utterance_id=lab.stem, audio_path=wav, text=text,
+                    speaker_id=lab.parent.name)
+        logger.info("Read %d transcripts from %s", len(by_id), corpus_dir)
+    else:
+        report = DatasetAuditor(config).audit()
+        by_id = {utterance.utterance_id: utterance for utterance in report.matched}
 
     textgrids = sorted(aligned_dir.rglob("*.TextGrid"))
     if not textgrids:
@@ -169,6 +195,12 @@ def speaker_split(speakers: list[str], holdout_fraction: float, seed: int = 0):
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--aligned", type=Path, default=PROJECT_ROOT / "output" / "aligned")
+    parser.add_argument("--corpus-dir", type=Path,
+                        help="MFA-format corpus of paired .wav/.lab to take "
+                             "transcripts from, instead of the audited SLR86 "
+                             "corpus. Use data/train_corpus with "
+                             "--aligned output/train_aligned to fit on all "
+                             "2,801 speakers rather than SLR86's 36.")
     parser.add_argument("--out", type=Path, default=DEFAULT_MODEL_PATH)
     parser.add_argument("--kind", choices=("gbm", "logreg"), default="gbm")
     parser.add_argument("--limit", type=int, help="Use only the first N utterances")
@@ -188,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
     config = EngineConfig()
-    rows, labels, speakers = collect(config, args.aligned, args.limit)
+    rows, labels, speakers = collect(config, args.aligned, args.limit, args.corpus_dir)
     if len(rows) < 200:
         raise SystemExit(f"Only {len(rows)} labelled vowels; too few to train.")
 
