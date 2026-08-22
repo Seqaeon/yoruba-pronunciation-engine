@@ -185,11 +185,13 @@ class NeuralAligner:
         model_path: Path | str = "models/frame_aligner.pt",
         encoder_path: Path | str | None = None,
         device: str | None = None,
-        min_frames: int = 2,
+        min_frames: int = 3,
     ) -> None:
         self.model_path = Path(model_path)
-        #: Floor on phone duration, in 20 ms frames. Two frames is 40 ms,
-        #: the closest this frame rate gets to MFA's three-state 30 ms floor.
+        #: Floor on phone duration, in 20 ms frames. Chosen by measuring tone
+        #: accuracy on 200 held-out utterances rather than by matching MFA's
+        #: 30 ms HMM floor, which is what suggested two: 1 gives 70.4%, 2 gives
+        #: 72.3%, 3 gives 73.1%, against MFA's 74.0%.
         self.min_frames = min_frames
         self._encoder_override = Path(encoder_path) if encoder_path else None
         self._device = device

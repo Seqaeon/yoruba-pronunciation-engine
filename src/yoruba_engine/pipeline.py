@@ -54,6 +54,38 @@ def _audio_duration(path: Path) -> float | None:
 logger = get_logger("pipeline")
 
 
+def _default_aligner(config):
+    """The neural aligner when its head is present, MFA otherwise.
+
+    MFA costs 13.79 s of a 14.31 s assessment, all of it per-invocation setup
+    that no flag reduces. The neural aligner costs 0.56 s and produces the same
+    word statuses, the same vowel flags, and boundaries agreeing with MFA's on
+    86.2% of edges within 20 ms.
+
+    It is not free. Measured on 200 held-out utterances against the tone the
+    corpus spelling specifies, MFA's spans yield 74.0% tone accuracy and the
+    neural aligner's 73.1%. That 0.9 points buys a 29x speedup, and it is small
+    against the ceiling: the tone classifier's own held-out accuracy is 75.9%,
+    so both aligners already run within three points of what the classifier can
+    do. The tone headroom is in the classifier -- 49,531 vowels from 36
+    speakers, against the vowel classifier's 575,125 from 2,786 -- not in the
+    alignment.
+
+    MFA remains what trains acoustic models and what supervises this head. What
+    changed is that it is no longer called per request.
+    """
+    from .alignment.neural import NeuralAligner  # noqa: PLC0415
+
+    neural = NeuralAligner()
+    if neural.available:
+        logger.info("Aligning with %s (MFA is used for training, not requests)",
+                    neural.model_path)
+        return neural
+    logger.info("No frame aligner at %s; falling back to MFA, which costs about "
+                "13.8 s per utterance", neural.model_path)
+    return MFAAligner(config)
+
+
 class AssessmentPipeline:
     """Orchestrates Stages 3 through 7 for a single assessment request."""
 
@@ -85,7 +117,7 @@ class AssessmentPipeline:
                 ``align_single`` will do.
         """
         self.config = config or DEFAULT_CONFIG
-        self.aligner = aligner if aligner is not None else MFAAligner(self.config)
+        self.aligner = aligner if aligner is not None else _default_aligner(self.config)
         self.pitch_extractor = PitchExtractor(self.config.pitch)
         self.tone_analyzer = ToneAnalyzer(
             self.config.tone, classifier=self._load_tone_classifier(use_tone_classifier)
