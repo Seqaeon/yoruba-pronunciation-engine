@@ -244,8 +244,13 @@ class AssessmentPipeline:
         Returns:
             The scored comparison with feedback.
         """
+        # With no reference recording the learner's file is the only thing that
+        # varies between assessments, so it names the report. A constant here
+        # meant every text-only assessment wrote prompt_report.txt over the
+        # last one.
         utt_id = utterance_id or (
-            reference_audio.stem if reference_audio is not None else "prompt")
+            reference_audio.stem if reference_audio is not None
+            else learner_audio.stem)
 
         if reference_audio is None:
             # No native recording for this prompt. The comparison never needed
@@ -704,7 +709,7 @@ class AssessmentPipeline:
 
     def assess_and_report(
         self,
-        reference_audio: Path,
+        reference_audio: Path | None,
         learner_audio: Path,
         target_text: str,
         output_dir: Path | None = None,

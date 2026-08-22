@@ -117,7 +117,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 
 def cmd_assess(args: argparse.Namespace) -> int:
-    """Stages 3-7: assess a learner recording against a reference."""
+    """Stages 3-7: assess a learner recording against a reference or a prompt."""
     config = _config_from_args(args)
 
     # Forced alignment cannot report what a learner said, only how badly the
@@ -134,8 +134,15 @@ def cmd_assess(args: argparse.Namespace) -> int:
         provider = WhisperTranscriptProvider()
     pipeline = AssessmentPipeline(config, transcript_provider=provider)
 
+    # A reference recording is optional. Yoruba orthography encodes tone, so the
+    # prompt's spelling is already a complete target: the engine takes its tone
+    # targets from the spelling either way, and the word sequence and vowel
+    # counts come from the text. See yoruba_engine.textref for what is and is
+    # not lost. This is the mode the app runs in, and the CLI could not reach
+    # it, so the one path with no reference recordings was the one path that
+    # could not be reproduced from a terminal.
     result, paths = pipeline.assess_and_report(
-        reference_audio=Path(args.reference),
+        reference_audio=Path(args.reference) if args.reference else None,
         learner_audio=Path(args.learner),
         target_text=args.text,
         learner_text=args.learner_text,
@@ -203,7 +210,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Recognise what the learner actually said with Whisper, instead of "
              "assuming they read the prompt. Names substituted words the "
              "dictionary does not contain, at about 2.8 s per assessment.")
-    assess.add_argument("--reference", required=True, help="Native-speaker audio")
+    assess.add_argument(
+        "--reference",
+        help="Native-speaker audio. Optional: without it the prompt's spelling "
+             "is the target, which is how the app scores phrases it has no "
+             "recording for.")
     assess.add_argument("--learner", required=True, help="Learner audio")
     assess.add_argument("--text", required=True, help="Target text, with tone marks")
     assess.add_argument("--learner-text", help="Learner transcript, if known")
