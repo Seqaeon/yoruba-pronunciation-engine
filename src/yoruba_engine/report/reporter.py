@@ -86,6 +86,16 @@ def alignment_rows(result: ComparisonResult) -> list[dict[str, str | None]]:
     unspoken = set(result.undetected_words)
     flagged_by_gop = [w for w in result.poorly_pronounced if w not in unspoken]
 
+    # The vowel check names words on the side that was aligned. In prompted
+    # mode that is the prompt's own words; with a recogniser it is the words the
+    # recogniser heard, because those are what MFA was given. Testing only the
+    # reference side meant the check's verdict never reached this table in the
+    # mode the app now runs in -- it silently never matched.
+    flagged = set(result.mispronounced_words) | set(flagged_by_gop)
+
+    def suspect(reference_word, learner_word):
+        return reference_word in flagged or learner_word in flagged
+
     rows: list[dict[str, str | None]] = []
     for ref_word, learner_word in result.word_pairs:
         shown = learner_word
@@ -99,7 +109,12 @@ def alignment_rows(result: ComparisonResult) -> list[dict[str, str | None]]:
         elif ref_word in result.substitutions:
             shown = result.substitutions[ref_word]
             status = "SAID DIFFERENTLY"
-        elif ref_word in result.mispronounced_words or ref_word in flagged_by_gop:
+        elif suspect(ref_word, learner_word):
+            # We know a word was spoken in this slot and that its vowels do not
+            # match what was aligned there. Naming a word would claim more than
+            # that: printing the prompt word would assert the learner produced
+            # it, and printing the recogniser's guess would assert they said
+            # that instead, when the acoustic evidence contradicts it.
             shown = "(unclear)"
             status = "CHECK VOWELS"
         elif ref_word == learner_word:
@@ -113,6 +128,12 @@ def alignment_rows(result: ComparisonResult) -> list[dict[str, str | None]]:
             # than as a wrong word.
             status = "ok"
         else:
+            # Two independent signals agree: the recogniser wrote a different
+            # word, and the vowel check did not object to it -- the audio in
+            # this slot is consistent with what was heard. One signal alone is
+            # not enough to tell a learner they said the wrong word, because a
+            # recogniser gets 82% of words right on native studio speech, and
+            # the 18% would all land here as accusations.
             status = "DIFFERENT"
         rows.append({"reference": ref_word, "learner": shown, "status": status})
     return rows
