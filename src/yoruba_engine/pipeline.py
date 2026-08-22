@@ -63,6 +63,7 @@ class AssessmentPipeline:
         transcript_provider: TranscriptProvider | None = None,
         use_tone_classifier: bool | None = None,
         use_vowel_verifier: bool | None = None,
+        aligner=None,
     ) -> None:
         """
         Args:
@@ -77,9 +78,14 @@ class AssessmentPipeline:
             use_vowel_verifier: Whether to check vowel identity, which catches
                 substitutions such as ``òkan`` for ``òkun``. Same policy:
                 ``None`` uses it when a model exists.
+            aligner: Where phone and word boundaries come from. Defaults to
+                :class:`~yoruba_engine.alignment.mfa.MFAAligner`. Pass a
+                :class:`~yoruba_engine.alignment.neural.NeuralAligner` to spend
+                0.04 s per utterance instead of 13.79 s; anything implementing
+                ``align_single`` will do.
         """
         self.config = config or DEFAULT_CONFIG
-        self.aligner = MFAAligner(self.config)
+        self.aligner = aligner if aligner is not None else MFAAligner(self.config)
         self.pitch_extractor = PitchExtractor(self.config.pitch)
         self.tone_analyzer = ToneAnalyzer(
             self.config.tone, classifier=self._load_tone_classifier(use_tone_classifier)

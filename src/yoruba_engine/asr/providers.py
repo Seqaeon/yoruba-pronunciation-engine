@@ -482,4 +482,18 @@ class WhisperTranscriptProvider:
             stripped = text.lstrip()
             if stripped[:len(context)].lower() == context.lower():
                 text = stripped[len(context):]
+
+            # The model sometimes returns the context and stops, leaving nothing
+            # once it is removed. An empty transcript is not a quiet result: it
+            # propagates as an empty .lab that forced alignment cannot align at
+            # all, so one echoed prompt took down a whole assessment. Decode it
+            # again without context and report what the audio alone gives.
+            if not text.strip():
+                logger.info("%s: the decoder returned only the prompt; "
+                            "re-decoding without context", audio_path.name)
+                with torch.inference_mode():
+                    tokens = model.generate(features.to(self._resolved_device),
+                                            max_new_tokens=128)
+                text = self._processor.batch_decode(
+                    tokens, skip_special_tokens=True)[0]
         return normalize(text.strip())
