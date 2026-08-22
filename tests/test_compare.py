@@ -330,3 +330,53 @@ class TestPhraseResemblance:
 
         assert phrase_resemblance("Ẹ káàbọ̀", "") == 0.0
 
+
+
+class TestResegmentation:
+    """A recogniser's word boundaries are guesswork; the prompt's are not."""
+
+    def test_a_merged_phrase_is_split_to_the_prompt(self):
+        from yoruba_engine.asr.segment import resegment_to_prompt
+
+        assert resegment_to_prompt("Ẹ káàbọ̀", "ekaabo").split() == ["e", "kaabo"]
+
+    def test_an_over_split_phrase_is_joined(self):
+        from yoruba_engine.asr.segment import resegment_to_prompt
+
+        assert len(resegment_to_prompt("Ẹ káàbọ̀", "e ka bo").split()) == 2
+
+    def test_correct_spacing_is_left_alone(self):
+        from yoruba_engine.asr.segment import resegment_to_prompt
+
+        prompt = "àbùbùtán bíi omi òkun"
+        assert resegment_to_prompt(prompt, "àbùbùtàn bí omi òkun") == \
+            "àbùbùtàn bí omi òkun"
+
+    def test_a_wrong_sound_survives_the_respacing(self):
+        """This must not quietly correct the learner towards the prompt."""
+        from yoruba_engine.asr.segment import resegment_to_prompt
+
+        assert resegment_to_prompt("Ẹ káàbọ̀", "e ka mo").split()[1] == "kamo"
+
+    def test_a_single_word_prompt_is_untouched(self):
+        from yoruba_engine.asr.segment import resegment_to_prompt
+
+        assert resegment_to_prompt("Jọ̀wọ́", "jo wo") == "jo wo"
+
+    def test_nothing_heard_stays_nothing(self):
+        from yoruba_engine.asr.segment import resegment_to_prompt
+
+        assert resegment_to_prompt("Ẹ káàbọ̀", "") == ""
+
+    def test_a_word_that_was_not_said_yields_no_token(self):
+        """Fewer words out than the prompt has is the honest outcome, not a
+        padded one: the learner did not produce that word."""
+        from yoruba_engine.asr.segment import resegment_to_prompt
+
+        out = resegment_to_prompt("Kí ni orúkọ rẹ", "orúkọ").split()
+        assert len(out) < 4
+
+    def test_tone_marks_are_preserved_in_the_output(self):
+        from yoruba_engine.asr.segment import resegment_to_prompt
+
+        assert "ọ́" in resegment_to_prompt("Ọwọ́ mi", "ọwọ́mi")

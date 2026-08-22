@@ -268,6 +268,20 @@ class AssessmentPipeline:
 
         if learner_text is None:
             learner_text = self.transcript_provider.transcribe(learner_audio, prompt=target_text)
+            if self.transcript_provider.recognizes_speech:
+                # Yoruba is written with spaces the speech does not have, so a
+                # recogniser's word boundaries are guesswork -- 'Ẹ káàbọ̀' comes
+                # back as 'ekaabo' or 'e ka bo'. Everything downstream pairs
+                # prompt words with heard ones, so a mis-split makes a correct
+                # attempt read as words not said. The prompt already fixes the
+                # word count; only the sounds are in question.
+                from .asr.segment import resegment_to_prompt  # noqa: PLC0415
+
+                respaced = resegment_to_prompt(target_text, learner_text)
+                if respaced != learner_text:
+                    logger.info("Re-spaced transcript %r as %r",
+                                learner_text, respaced)
+                    learner_text = respaced
 
         learner = self.analyse_utterance(
             learner_audio, learner_text, utterance_id=f"{utt_id}_learner"
