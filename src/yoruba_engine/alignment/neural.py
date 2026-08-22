@@ -71,7 +71,7 @@ def _strip_tone(symbol: str) -> str:
 
 
 def viterbi(log_posteriors: np.ndarray, sequence: np.ndarray,
-            optional: np.ndarray) -> np.ndarray:
+            optional: np.ndarray, min_frames: int = 1) -> np.ndarray:
     """Align a known phone sequence to frames, monotonically.
 
     Each phone occupies a contiguous run, runs appear in order, and every frame
@@ -80,61 +80,96 @@ def viterbi(log_posteriors: np.ndarray, sequence: np.ndarray,
 
     ``optional`` marks states that may be skipped entirely, which is how silence
     between words is handled: MFA models it as optional, and requiring it would
-    force at least one frame of silence into every word gap whether the speaker
-    paused or not.
+    force a frame of silence into every word gap whether the speaker paused or
+    not.
+
+    ``min_frames`` is a floor on how long a phone may last, imposed by expanding
+    each phone into that many sub-states of which only the last may repeat.
+    Without it a phone can collapse into a single 20 ms frame, where MFA's
+    three-state HMM cannot go below 30 ms -- measured, that produced 22% of
+    vowels under 40 ms against MFA's 12%, and a vowel pooled from one frame
+    gives the vowel classifier almost nothing to read.
 
     Args:
         log_posteriors: ``(frames, classes)`` log probabilities.
         sequence: Class index per state, in pronunciation order.
         optional: Boolean per state; True means the state may be skipped.
+        min_frames: Minimum duration of a non-optional phone, in frames.
 
     Returns:
         The frame index at which each state starts. A skipped optional state
         takes the start of the state that follows it, giving it zero duration.
     """
-    frames, states = len(log_posteriors), len(sequence)
-    if frames < states:
-        raise AlignmentError(
-            f"{frames} frames cannot hold {states} phones; the recording is "
-            "shorter than the text requires")
+    frames = len(log_posteriors)
+    states = len(sequence)
 
-    emission = log_posteriors[:, sequence]
-    scores = np.full((frames, states), -np.inf, dtype=np.float32)
-    # 0 = stay in this state, 1 = came from the previous, 2 = skipped one.
-    came_from = np.zeros((frames, states), dtype=np.int8)
+    # Expand: a phone needing d frames becomes d sub-states, of which only the
+    # last may repeat, so any path through it spends at least d frames there.
+    classes: list[int] = []
+    owner: list[int] = []
+    can_stay: list[bool] = []
+    skippable: list[bool] = []
+    for position, (label, is_optional) in enumerate(zip(sequence, optional)):
+        wanted = 1 if is_optional else max(int(min_frames), 1)
+        for step in range(wanted):
+            classes.append(int(label))
+            owner.append(position)
+            can_stay.append(step == wanted - 1)
+            skippable.append(bool(is_optional))
+
+    expanded = len(classes)
+    if frames < expanded:
+        raise AlignmentError(
+            f"{frames} frames cannot hold {states} phones at a {min_frames}-frame "
+            "minimum; the recording is shorter than the text requires")
+
+    emission = log_posteriors[:, np.array(classes)]
+    stay_allowed = np.array(can_stay)
+    can_skip = np.array(skippable)
+
+    scores = np.full((frames, expanded), -np.inf, dtype=np.float32)
+    # 0 = stayed, 1 = came from the previous state, 2 = skipped one.
+    came_from = np.zeros((frames, expanded), dtype=np.int8)
 
     scores[0, 0] = emission[0, 0]
-    # A leading optional silence may be skipped, so state 1 can also start here.
-    if states > 1 and optional[0]:
+    if expanded > 1 and can_skip[0]:
         scores[0, 1] = emission[0, 1]
         came_from[0, 1] = 1
 
     for t in range(1, frames):
-        stay = scores[t - 1]
+        stay = np.where(stay_allowed, scores[t - 1], -np.inf)
         advance = np.concatenate(([-np.inf], scores[t - 1, :-1]))
         skip = np.concatenate(([-np.inf, -np.inf], scores[t - 1, :-2]))
-        # Only legal where the state being jumped over is optional.
-        if states > 2:
-            skippable = np.concatenate(([False, False], optional[:-2]))
-            skip = np.where(skippable, skip, -np.inf)
+        if expanded > 2:
+            # Only legal where the state jumped over is a skippable one.
+            jumped = np.concatenate(([False, False], can_skip[:-2]))
+            skip = np.where(jumped, skip, -np.inf)
         stacked = np.vstack([stay, advance, skip])
         choice = np.argmax(stacked, axis=0)
-        scores[t] = stacked[choice, np.arange(states)] + emission[t]
+        scores[t] = stacked[choice, np.arange(expanded)] + emission[t]
         came_from[t] = choice
 
-    starts = np.zeros(states, dtype=np.int64)
-    position = states - 1
+    # Walk back through the expanded lattice, then collapse to real phones.
+    starts_expanded = np.zeros(expanded, dtype=np.int64)
+    position = expanded - 1
     t = frames - 1
     while t > 0 and position > 0:
         step = came_from[t, position]
         if step == 1:
-            starts[position] = t
+            starts_expanded[position] = t
             position -= 1
         elif step == 2:
-            starts[position] = t
-            starts[position - 1] = t      # skipped: zero duration
+            starts_expanded[position] = t
+            starts_expanded[position - 1] = t      # skipped: zero duration
             position -= 2
         t -= 1
+
+    starts = np.zeros(states, dtype=np.int64)
+    seen = set()
+    for expanded_index, phone_index in enumerate(owner):
+        if phone_index not in seen:
+            starts[phone_index] = starts_expanded[expanded_index]
+            seen.add(phone_index)
     return starts
 
 
@@ -150,8 +185,12 @@ class NeuralAligner:
         model_path: Path | str = "models/frame_aligner.pt",
         encoder_path: Path | str | None = None,
         device: str | None = None,
+        min_frames: int = 2,
     ) -> None:
         self.model_path = Path(model_path)
+        #: Floor on phone duration, in 20 ms frames. Two frames is 40 ms,
+        #: the closest this frame rate gets to MFA's three-state 30 ms floor.
+        self.min_frames = min_frames
         self._encoder_override = Path(encoder_path) if encoder_path else None
         self._device = device
         self._head = None
@@ -277,7 +316,7 @@ class NeuralAligner:
             log_posteriors = torch.log_softmax(logits, -1).cpu().numpy()
 
         sequence, optional, owner, words = self._states(transcript)
-        starts = viterbi(log_posteriors, sequence, optional)
+        starts = viterbi(log_posteriors, sequence, optional, self.min_frames)
         ends = np.append(starts[1:], len(log_posteriors))
 
         phones: list[Interval] = []

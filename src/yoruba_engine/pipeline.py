@@ -416,7 +416,20 @@ class AssessmentPipeline:
             return None
         from .alignment.gop import GOPReference  # noqa: PLC0415
 
-        path = self.config.mfa.acoustic_model.parent / "gop_reference.json"
+        # Which reference depends on which aligner produced the scores. MFA
+        # reports a GMM log-likelihood, typically -4 to -5; the neural aligner
+        # reports a mean log-posterior, bounded above by zero and around -0.2.
+        # Measured on the same phones: a -4.78 against a -0.11. Using one
+        # reference for the other's scores would flag or excuse words for
+        # arithmetic reasons, so the pairing is chosen rather than assumed.
+        from .alignment.neural import NeuralAligner  # noqa: PLC0415
+
+        name = ("gop_reference_neural.json"
+                if isinstance(self.aligner, NeuralAligner) else "gop_reference.json")
+        path = self.config.mfa.acoustic_model.parent / name
+        if not path.exists():
+            logger.info("No GOP reference at %s; the check is skipped", path)
+            return None
         reference = GOPReference.load(path)
         if not reference.statistics:
             return None
