@@ -1,7 +1,7 @@
 {
  "schema": 1,
- "release_tag": "v0.5.0",
- "note": "Artifacts too large for git. Fetch with scripts/fetch_models.py. The calibration files committed in models/ (gop_reference.json, word_duration_stats.json) are measurements of THIS acoustic model's behaviour and are wrong for any other -- see acoustic_model_sha256. vowel_classifier.joblib additionally requires the wav2vec2 checkpoint; without it the engine disables vowel-identity checking rather than failing.",
+ "release_tag": "v0.6.0",
+ "note": "Artifacts too large for git. Fetch with scripts/fetch_models.py. The small heads trained on top of these -- models/frame_aligner.pt (2.2 MB), models/tone_sequence.pt (1.1 MB) and models/gop_reference_neural.json -- live in the repository instead, so a clone gets sub-second alignment and the better tone reading with no fetch step. The calibration files committed in models/ (gop_reference.json, word_duration_stats.json) are measurements of THIS acoustic model's behaviour and are wrong for any other -- see acoustic_model_sha256. gop_reference_neural.json is the same measurement for the neural aligner, whose scores are log-posteriors rather than GMM log-likelihoods and are not on the same scale.",
  "artifacts": {
   "models/yoruba_acoustic.zip": {
    "bytes": 92233028,
@@ -14,9 +14,9 @@
    "purpose": "Vowel identity, 575,125 vowels from 2,786 speakers, fitted to models/finetuned_utterance. It names its encoder in its metadata and the engine loads that, so the pair cannot drift."
   },
   "models/tone_classifier.joblib": {
-   "bytes": 2567144,
-   "sha256": "b00861db9b5a657023dcff24c8404055f1573c292665033215e4cb49b54c51e9",
-   "purpose": "Tone classifier, trained on this aligner's boundaries."
+   "bytes": 3273919,
+   "sha256": "4e4bc9f973f4ebc7bbe5065a3ecd25fdc6149867cdf64e62f485c13fe56c1e3c",
+   "purpose": "Fallback tone classifier: a gradient-boosted tree over 14 pitch features, 205,690 vowels from 2,702 speakers. Superseded by models/tone_sequence.pt, which reads a whole utterance at once and is committed to git rather than released because it is 1.1 MB. On one identical held-out set the sequence model scores 74.7%, this tree 69.0%, the 36-speaker tree it replaces 66.6%, and the threshold rules 56.3%."
   },
   "models/finetuned_utterance/model.safetensors": {
    "asset": "finetuned_utterance.safetensors",

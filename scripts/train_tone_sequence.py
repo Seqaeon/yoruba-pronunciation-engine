@@ -204,11 +204,39 @@ def main() -> int:
     parser.add_argument("--batch", type=int, default=64)
     parser.add_argument("--lr", type=float, default=2e-3)
     parser.add_argument("--holdout", type=float, default=0.2)
+    parser.add_argument("--cache", type=Path,
+                        default=ROOT / "data" / "tone_sequences.npz",
+                        help="Where to keep extracted sequences so a "
+                             "second architecture does not repeat 23 "
+                             "minutes of pitch extraction.")
     args = parser.parse_args()
 
     config = EngineConfig()
-    sequences, targets, speakers = build_sequences(
-        config, args.aligned, args.corpus_dir, args.limit)
+
+    # Pitch extraction over the corpus is 23 minutes and produces the same
+    # sequences every time, so trying a second architecture should not pay for
+    # it again. The cache is keyed on what changes the sequences, not on the
+    # model: a different --limit or a different corpus writes a different file.
+    cache = args.cache
+    if cache is not None:
+        cache = cache.with_name(
+            f"{cache.stem}_{args.limit or 'all'}{cache.suffix}")
+    if cache is not None and cache.exists():
+        blob = np.load(cache, allow_pickle=True)
+        sequences = list(blob["sequences"])
+        targets = list(blob["targets"])
+        speakers = list(blob["speakers"])
+        print(f"reusing {len(sequences)} cached sequences from {cache}")
+    else:
+        sequences, targets, speakers = build_sequences(
+            config, args.aligned, args.corpus_dir, args.limit)
+        if cache is not None and sequences:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(cache,
+                     sequences=np.array(sequences, dtype=object),
+                     targets=np.array(targets, dtype=object),
+                     speakers=np.array(speakers, dtype=object))
+            print(f"cached sequences to {cache}")
     if not sequences:
         print("No usable sequences", file=sys.stderr)
         return 1
