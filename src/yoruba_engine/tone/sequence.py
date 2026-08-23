@@ -36,7 +36,10 @@ from pathlib import Path
 
 from ..datatypes import VowelSegment
 from .classifier import TONE_ORDER
-from .features import extract_features, measurable
+from .features import (
+    FEATURE_COUNT, SEQUENCE_FEATURE_COUNT, extract_features,
+    extract_sequence_features, measurable,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +57,12 @@ class ToneSequenceClassifier:
     path.
     """
 
-    def __init__(self, net, mean, sd, metadata: dict, device: str = "cpu") -> None:
+    def __init__(self, net, mean, sd, metadata: dict, device: str = "cpu",
+                 features: int = FEATURE_COUNT) -> None:
         self.net = net
+        #: How wide this checkpoint's input is, and therefore which feature
+        #: builder it must be fed.
+        self.features = features
         self.mean = mean
         self.sd = sd
         self.metadata = metadata
@@ -88,6 +95,25 @@ class ToneSequenceClassifier:
         checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
         hidden = int(checkpoint["hidden"])
         features = int(checkpoint["features"])
+        # The checkpoint records how wide its input was, and that decides which
+        # feature builder runs. Both widths are legitimate -- 14 summary features,
+        # or those plus 8 contour points -- and pairing a model with the wrong
+        # one is not a subtle degradation: it raises on the first assessment, or
+        # worse, silently reads the wrong columns.
+        #
+        # This was not hypothetical. Widening the shared builder for an
+        # experiment broke every request against the deployed 14-feature model
+        # with "operands could not be broadcast together with shapes (10,22)
+        # (14,)", while a comment two lines above claimed this field prevented
+        # exactly that.
+        if features not in (FEATURE_COUNT, SEQUENCE_FEATURE_COUNT):
+            logger.warning(
+                "Tone sequence model at %s expects %d features, which is neither "
+                "%d nor %d; refusing to load it rather than feed it the wrong "
+                "columns", model_path, features, FEATURE_COUNT,
+                SEQUENCE_FEATURE_COUNT)
+            return None
+
         net = nn.ModuleDict({
             "project": nn.Sequential(nn.Linear(features, hidden), nn.GELU()),
             "rnn": nn.GRU(hidden, hidden, num_layers=2, batch_first=True,
@@ -103,7 +129,7 @@ class ToneSequenceClassifier:
         logger.info("Loaded tone sequence model from %s (held-out accuracy %.3f)",
                     model_path, metadata.get("holdout_accuracy", float("nan")))
         return cls(net, np.asarray(checkpoint["mean"]), np.asarray(checkpoint["sd"]),
-                   metadata, resolved)
+                   metadata, resolved, features)
 
     def predict(self, vowels: list[VowelSegment]) -> None:
         """Classify an utterance's tone-bearing units in place.
@@ -119,7 +145,10 @@ class ToneSequenceClassifier:
         import numpy as np  # noqa: PLC0415
         import torch  # noqa: PLC0415
 
-        rows = extract_features(vowels)
+        builder = (extract_sequence_features
+                   if self.features == SEQUENCE_FEATURE_COUNT
+                   else extract_features)
+        rows = builder(vowels)
         if not rows:
             return
         targets = measurable(vowels)

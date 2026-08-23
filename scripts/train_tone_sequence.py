@@ -67,7 +67,9 @@ def build_sequences(config, aligned_dir: Path, corpus_dir: Path, limit: int | No
     from yoruba_engine.g2p.orthography import is_noise_token, tone_pattern
     from yoruba_engine.pitch.extractor import PitchExtractor
     from yoruba_engine.tone.analyzer import ToneAnalyzer
-    from yoruba_engine.tone.features import extract_features, measurable
+    from yoruba_engine.tone.features import (
+        extract_sequence_features, measurable,
+    )
 
     by_id = {}
     for lab in corpus_dir.rglob("*.lab"):
@@ -128,7 +130,7 @@ def build_sequences(config, aligned_dir: Path, corpus_dir: Path, limit: int | No
         if not measurable(vowels):
             skipped += 1
             continue
-        features = extract_features(vowels)
+        features = extract_sequence_features(vowels)
         measured_positions = [i for i, v in enumerate(vowels)
                               if v.mean_semitones is not None]
 
@@ -185,7 +187,7 @@ def main() -> int:
     import torch.nn as nn
 
     from yoruba_engine.config import EngineConfig
-    from yoruba_engine.tone.features import FEATURE_COUNT
+    from yoruba_engine.tone.features import SEQUENCE_FEATURE_COUNT
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--aligned", type=Path, default=ROOT / "output" / "train_aligned")
@@ -220,7 +222,7 @@ def main() -> int:
     cache = args.cache
     if cache is not None:
         cache = cache.with_name(
-            f"{cache.stem}_{args.limit or 'all'}{cache.suffix}")
+            f"{cache.stem}_{args.limit or 'all'}_v2{cache.suffix}")
     if cache is not None and cache.exists():
         blob = np.load(cache, allow_pickle=True)
         sequences = list(blob["sequences"])
@@ -262,7 +264,7 @@ def main() -> int:
     sd[sd < 1e-6] = 1.0
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = ToneSequenceModel(FEATURE_COUNT, args.hidden)
+    model = ToneSequenceModel(SEQUENCE_FEATURE_COUNT, args.hidden)
     net = model.net.to(device)
     optimiser = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=1e-4)
     schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, args.epochs)
@@ -285,7 +287,7 @@ def main() -> int:
             np.random.default_rng(1).shuffle(chunks)
         for chunk in chunks:
             longest = max(len(targets[i]) for i in chunk)
-            padded = np.zeros((len(chunk), longest, FEATURE_COUNT), dtype=np.float32)
+            padded = np.zeros((len(chunk), longest, SEQUENCE_FEATURE_COUNT), dtype=np.float32)
             labels = np.full((len(chunk), longest), -100, dtype=np.int64)
             lengths = np.zeros(len(chunk), dtype=np.int64)
             for row, i in enumerate(chunk):
@@ -330,7 +332,7 @@ def main() -> int:
         if accuracy > best:
             best = accuracy
             torch.save({"state_dict": net.state_dict(), "mean": mean, "sd": sd,
-                        "hidden": args.hidden, "features": FEATURE_COUNT,
+                        "hidden": args.hidden, "features": SEQUENCE_FEATURE_COUNT,
                         "holdout_accuracy": accuracy,
                         "units": int(sum(len(targets[i]) for i in train_index)),
                         "speakers": len(set(speakers)),

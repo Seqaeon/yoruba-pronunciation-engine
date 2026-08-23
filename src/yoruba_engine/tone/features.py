@@ -121,3 +121,72 @@ def _index_in_word(vowels: list[VowelSegment], target: VowelSegment) -> int:
         if vowel.word_index == target.word_index:
             position += 1
     return position
+
+
+#: How many points of each unit's pitch contour to sample.
+#:
+#: The 14 summary features compress a whole contour into ``excursion``, one
+#: number -- and permutation importance ranks it first, worth +0.092 accuracy on
+#: held-out speakers. That is the model saying shape matters more than anything
+#: else it is given, through the narrowest channel it has.
+#:
+#: Eight points is a compromise. A Yoruba vowel runs about 95 ms, which at
+#: Praat's default step is roughly nine or ten pitch measurements, so eight
+#: samples is near the real resolution rather than interpolating detail that was
+#: never measured.
+CONTOUR_POINTS = 8
+
+
+def contour_shape(vowel: VowelSegment, points: int = CONTOUR_POINTS) -> list[float]:
+    """Resample one unit's pitch contour to a fixed number of points.
+
+    Returned **relative to the unit's own mean**, so this describes shape and
+    nothing else. Height is already carried by ``level`` and ``level_z``, which
+    have had declination removed; the raw contour has not, and subtracting the
+    unit's mean makes that irrelevant rather than wrong.
+
+    A unit with no usable pitch returns zeros, which is the same thing the
+    summary features do for it -- and such units are excluded from scoring by
+    :func:`measurable` anyway.
+    """
+    values = [p.semitones for p in vowel.contour if p.semitones is not None]
+    if not values:
+        return [0.0] * points
+    centre = sum(values) / len(values)
+    if len(values) == 1:
+        return [0.0] * points
+
+    # Linear resampling onto a fixed grid. The contour is short and already
+    # smoothed by the pitch tracker, so anything fancier would be inventing
+    # structure.
+    out: list[float] = []
+    last = len(values) - 1
+    for index in range(points):
+        position = index * last / (points - 1)
+        low = int(position)
+        high = min(low + 1, last)
+        weight = position - low
+        sample = values[low] * (1 - weight) + values[high] * weight
+        out.append(float(sample - centre))
+    return out
+
+
+def extract_sequence_features(vowels: list[VowelSegment],
+                              points: int = CONTOUR_POINTS) -> list[list[float]]:
+    """The summary features with each unit's contour shape appended.
+
+    One function so training and inference cannot drift. This project has
+    already been bitten by two implementations of one table disagreeing; a
+    feature vector assembled twice would be the same failure with no visible
+    symptom, since a model fed the wrong column order still returns confident
+    predictions.
+    """
+    rows = extract_features(vowels)
+    if not rows:
+        return rows
+    return [row + contour_shape(vowel, points)
+            for row, vowel in zip(rows, measurable(vowels))]
+
+
+#: Width of the vector :func:`extract_sequence_features` produces.
+SEQUENCE_FEATURE_COUNT = FEATURE_COUNT + CONTOUR_POINTS

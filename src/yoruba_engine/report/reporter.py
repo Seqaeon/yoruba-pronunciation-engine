@@ -110,12 +110,33 @@ def alignment_rows(result: ComparisonResult) -> list[dict[str, str | None]]:
             shown = result.substitutions[ref_word]
             status = "SAID DIFFERENTLY"
         elif suspect(ref_word, learner_word):
-            # We know a word was spoken in this slot and that its vowels do not
-            # match what was aligned there. Naming a word would claim more than
-            # that: printing the prompt word would assert the learner produced
-            # it, and printing the recogniser's guess would assert they said
-            # that instead, when the acoustic evidence contradicts it.
-            shown = "(unclear)"
+            # The vowels in this slot do not match what was aligned there. What
+            # to show depends on whether anything independent named it.
+            #
+            # With a recogniser, the learner word is a real hypothesis about
+            # what was said -- 'àbùbùtùn' for a prompted 'àbùbùtán' -- and the
+            # status already says not to trust it fully. Replacing it with
+            # "(unclear)" throws away the only concrete thing the learner can
+            # act on, which is what it was doing.
+            #
+            # Without one, the learner word is the prompt echoed back, and
+            # printing it would assert the learner produced the very word the
+            # vowels contradict. That is the case "(unclear)" exists for.
+            # Whether a name exists depends on the mode, not on whether the
+            # name happens to equal the prompt.
+            #
+            # With a recogniser the learner word is an independent hypothesis
+            # about what was said, and it is worth showing even when it matches
+            # the prompt exactly -- "you said ẹ, but check its vowel" is a
+            # different and more useful message than "(unclear)". Testing word
+            # equality instead blanked precisely the words the recogniser got
+            # right, which is how ``ẹ`` came back as unclear while the transcript
+            # underneath read ``... ni ẹ``.
+            #
+            # Without one, the learner word is the prompt echoed back, and
+            # printing it would assert the learner produced the very word the
+            # vowels contradict. That is what "(unclear)" is for.
+            shown = learner_word if result.text_similarity_applicable else "(unclear)"
             status = "CHECK VOWELS"
         elif ref_word == learner_word:
             status = "ok"

@@ -362,6 +362,7 @@ class AssessmentPipeline:
             # the prompt rather than from alignment quality. The vowel check
             # still runs: it reports how a word that *was* said was produced.
             mispronounced = self._check_vowel_identity(learner)
+            self._defer_to_vowels(learner, target_text, mispronounced)
 
             # A word that was not produced cannot have been said differently.
             #
@@ -602,6 +603,59 @@ class AssessmentPipeline:
                             verdict.margin)
                 word.word = verdict.decoded
         return substitutions
+
+    def _defer_to_vowels(self, learner: UtteranceAnalysis, target_text: str,
+                         mispronounced: list[str]) -> None:
+        """Restore a prompt word the recogniser altered and the acoustics reject.
+
+        Two components disagree about one slot, and the engine was believing the
+        wrong one. A learner reading ``ó dàbọ̀`` was transcribed ``ó dàbò`` --
+        the sub-dot lost, which changes the vowel from /ɔ/ to /o/ -- and scored
+        50% on a two-word phrase. But the vowel check *also* rejected ``dàbò``,
+        which means the audio does not support what the recogniser heard either.
+
+        When that happens the honest reading is that the transcript is wrong,
+        not the learner. The vowel classifier is measured at 93.1% on vowel
+        identity, and the recogniser's diacritics are documented as drifting, so
+        on this specific question the classifier is the better witness.
+
+        Only near-misses are restored: the two spellings must agree once tone
+        marks and sub-dots are removed, so ``dàbò`` reverts to ``dàbọ̀`` while
+        ``ọkàn`` never reverts to ``òkun``. A genuine substitution differs by
+        more than diacritics and keeps being reported as one.
+
+        The word still carries CHECK VOWELS. What changes is that it stops
+        counting as a wrong *word* when the only evidence it was wrong is a
+        transcript the acoustics contradict.
+        """
+        import unicodedata  # noqa: PLC0415
+
+        from .compare.engine import _collapse_repeats  # noqa: PLC0415
+        from .g2p.orthography import normalize, strip_tones, tokenize  # noqa: PLC0415
+
+        def bare(word: str) -> str:
+            """Spelling with tone marks and sub-dots removed."""
+            decomposed = unicodedata.normalize("NFD", strip_tones(normalize(word)))
+            return _collapse_repeats(
+                "".join(c for c in decomposed if not unicodedata.combining(c)).lower())
+
+        flagged = set(mispronounced)
+        if not flagged:
+            return
+        prompt_words = tokenize(normalize(target_text), keep_noise=False)
+        restored = []
+        for position, word in enumerate(learner.words):
+            if word.word not in flagged or position >= len(prompt_words):
+                continue
+            expected = prompt_words[position]
+            if word.word != expected and bare(word.word) == bare(expected):
+                restored.append((word.word, expected))
+                word.word = expected
+        if restored:
+            logger.info(
+                "%s: the vowel check rejected the recogniser's spelling, so "
+                "%s reverted to the prompt's", learner.utterance_id,
+                ", ".join(f"{heard!r}->{want!r}" for heard, want in restored))
 
     def _check_vowel_identity(self, learner: UtteranceAnalysis) -> list[str]:
         """Remove words the learner appears to have said as a different word.
