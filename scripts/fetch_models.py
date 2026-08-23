@@ -137,9 +137,15 @@ def main() -> int:
             # fine-tuned one -- cannot both be uploaded under it. The manifest
             # names the asset explicitly where the basename would collide.
             asset = expected.get("asset") or Path(relative).name
-            fetched = download_with_gh(args.repo, tag, path, asset=asset)
+            # An artifact unchanged since an earlier release stays on that
+            # release rather than being re-uploaded. 1.75 GB of encoder and
+            # Whisper weights did not change between v0.5.0 and v0.6.0, and
+            # copying them forward would cost an upload for no difference.
+            asset_tag = args.tag or expected.get("tag") or tag
+            fetched = download_with_gh(args.repo, asset_tag, path, asset=asset)
             if not fetched:
-                url = base + asset
+                url = (args.base_url or DEFAULT_BASE.format(
+                    repo=args.repo, tag=asset_tag)) + "/" + asset
                 try:
                     download(url, path)
                     fetched = True
@@ -168,9 +174,11 @@ def main() -> int:
 
         print(f"{relative:<40}{'fetching':<13}{spec['bytes'] / 1e6:.1f} MB")
         archive = PROJECT_ROOT / "models" / spec["asset"]
-        if not download_with_gh(args.repo, tag, archive, asset=spec["asset"]):
+        asset_tag = args.tag or spec.get("tag") or tag
+        if not download_with_gh(args.repo, asset_tag, archive, asset=spec["asset"]):
             try:
-                download(base + spec["asset"], archive)
+                download((args.base_url or DEFAULT_BASE.format(
+                    repo=args.repo, tag=asset_tag)) + "/" + spec["asset"], archive)
             except (urllib.error.URLError, urllib.error.HTTPError) as exc:
                 print(f"  ! {exc}")
                 continue

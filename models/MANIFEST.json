@@ -22,7 +22,8 @@
    "asset": "finetuned_utterance.safetensors",
    "bytes": 858709376,
    "sha256": "f82e02f1579d8e74ceeacd5e394409ee4bf2329002b15daf5323fe69ebfc2da9",
-   "purpose": "The encoder the vowel classifier is fitted to. LyngualLabs' mms-300m-yoruba-english fine-tuned on whole utterances and truncated to the 16 layers the engine reads. Required: the classifier reads noise from any other encoder."
+   "purpose": "The encoder the vowel classifier is fitted to. LyngualLabs' mms-300m-yoruba-english fine-tuned on whole utterances and truncated to the 16 layers the engine reads. Required: the classifier reads noise from any other encoder.",
+   "tag": "v0.5.0"
   }
  },
  "acoustic_model_sha256": "92d13ef28b73319ae1c1ed2373832f7c66d6348fd10d12f7549edb2ec5f94f96",
@@ -112,7 +113,8 @@
    "asset": "whisper-yoruba.tar.gz",
    "bytes": 894496704,
    "sha256": "d0db25ba421e3a44dba111dbaf46bdfd610134365f9573d9d619eb477bb1fcce",
-   "purpose": "Whisper checkpoint for open-vocabulary transcription. Optional only in the sense that the engine runs without it: without a recogniser the learner's transcript is the prompt echoed back, so the word table cannot name a substituted word and verification falls back to alignment coverage, a proxy that reaches 72% balanced accuracy. Fetch it with --include-optional if you are serving the app."
+   "purpose": "Whisper checkpoint for open-vocabulary transcription. Optional only in the sense that the engine runs without it: without a recogniser the learner's transcript is the prompt echoed back, so the word table cannot name a substituted word and verification falls back to alignment coverage, a proxy that reaches 72% balanced accuracy. Fetch it with --include-optional if you are serving the app.",
+   "tag": "v0.5.0"
   }
  }
 }
