@@ -651,11 +651,22 @@ class AssessmentPipeline:
             if word.word != expected and bare(word.word) == bare(expected):
                 restored.append((word.word, expected))
                 word.word = expected
-        if restored:
-            logger.info(
-                "%s: the vowel check rejected the recogniser's spelling, so "
-                "%s reverted to the prompt's", learner.utterance_id,
-                ", ".join(f"{heard!r}->{want!r}" for heard, want in restored))
+        if not restored:
+            return
+
+        # The transcript has to agree. Restoring the word only in the alignment
+        # left the screen contradicting itself: a table row reading `dàbọ̀ ok`
+        # above a line reading "We heard: ó dàbò". If the engine has concluded
+        # the recogniser dropped a sub-dot, it should not keep quoting the
+        # spelling it just rejected.
+        swap = {heard: want for heard, want in restored}
+        learner.transcript = " ".join(
+            swap.get(token, token) for token in learner.transcript.split())
+
+        logger.info(
+            "%s: the vowel check rejected the recogniser's spelling, so "
+            "%s reverted to the prompt's", learner.utterance_id,
+            ", ".join(f"{heard!r}->{want!r}" for heard, want in restored))
 
     def _check_vowel_identity(self, learner: UtteranceAnalysis) -> list[str]:
         """Remove words the learner appears to have said as a different word.
