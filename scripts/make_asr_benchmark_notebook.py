@@ -67,6 +67,25 @@ rows = list(csv.DictReader(open(PACK / "manifest.tsv", encoding="utf-8"), delimi
 print(f"{len(rows)} readings, {sum(int(r['sub_dots']) for r in rows)} sub-dots")
 print("device:", "cuda" if torch.cuda.is_available() else "cpu")"""),
 
+md("""## Access
+
+`NCAIR1/Yoruba-ASR` is gated: request access on its model page first. The token
+is read from a Kaggle secret or an environment variable and never written into
+the notebook, because a notebook is a thing people share."""),
+
+code("""HF_TOKEN = None
+try:
+    from kaggle_secrets import UserSecretsClient
+    HF_TOKEN = UserSecretsClient().get_secret("HF_TOKEN")     # Add-ons -> Secrets
+except Exception:
+    HF_TOKEN = os.environ.get("HF_TOKEN")
+
+if HF_TOKEN:
+    os.environ["HF_TOKEN"] = HF_TOKEN
+    print("token found; gated repositories are available")
+else:
+    print("no token; gated repositories will be skipped with a clear error")"""),
+
 md("""## Scoring
 
 Self-contained, so the notebook does not need the engine installed. These are the
@@ -164,15 +183,19 @@ code("""CANDIDATES = {
     "whisper-medium-yoruba":          "neoform-ai/whisper-medium-yoruba",
     "large-v3-yoruba-v3":             "devalade/whisper-large-v3-yoruba-v3",
     "Largev2-Decodis_Comb_FT":        "RafatK/Whisper_Largev2-Yoruba-Decodis_Comb_FT",
-    # "NCAIR1/Yoruba-ASR",   # gated: request access, then add your HF token
+    "NCAIR1/Yoruba-ASR":              "NCAIR1/Yoruba-ASR",   # gated; needs HF_TOKEN
 }
 CONTEXTS = [False, True]      # without and with prompt conditioning"""),
 
 code("""def transcribe(model, processor, wav, prompt, use_context, device):
     samples, rate = sf.read(str(wav), dtype="float32")
     assert rate == 16000, f"{wav} is {rate} Hz; the pack should be 16 kHz"
+    # Features must match the model's dtype. Loading in fp16 and feeding fp32
+    # raises "Input type (float) and bias type (c10::Half) should be the same",
+    # which is what this notebook did on every candidate the first time it ran.
     feats = processor.feature_extractor(
-        samples, sampling_rate=16000, return_tensors="pt").input_features.to(device)
+        samples, sampling_rate=16000,
+        return_tensors="pt").input_features.to(device=device, dtype=model.dtype)
     kwargs = {"max_new_tokens": 128}
     if use_context:
         kwargs["prompt_ids"] = processor.get_prompt_ids(prompt, return_tensors="pt").to(device)
@@ -191,11 +214,30 @@ code("""def transcribe(model, processor, wav, prompt, use_context, device):
     return text.strip(), False
 
 
-def evaluate(name, model_id, device):
-    processor = WhisperProcessor.from_pretrained(model_id)
+def load(model_id, device):
+    \"\"\"Load a checkpoint, tolerating an incomplete upload.
+
+    Several of these are Colab exports missing `preprocessor_config.json`, so
+    the feature extractor cannot be built from the repository. Whisper's mel
+    front end is fixed per model size, so borrowing it from the base checkpoint
+    is exact rather than approximate -- and better than skipping the candidate.
+    \"\"\"
+    token = os.environ.get("HF_TOKEN") or None
     model = WhisperForConditionalGeneration.from_pretrained(
-        model_id, torch_dtype=torch.float16 if device == "cuda" else torch.float32)
-    model = model.to(device).eval()
+        model_id, token=token,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32)
+    try:
+        processor = WhisperProcessor.from_pretrained(model_id, token=token)
+    except Exception:
+        base = {32: "openai/whisper-large-v2", 24: "openai/whisper-medium",
+                12: "openai/whisper-small"}[model.config.encoder_layers]
+        print(f"   no preprocessor in the repo; using {base}'s")
+        processor = WhisperProcessor.from_pretrained(base)
+    return model.to(device).eval(), processor
+
+
+def evaluate(name, model_id, device):
+    model, processor = load(model_id, device)
     params = sum(p.numel() for p in model.parameters())
 
     out = []
