@@ -362,7 +362,7 @@ class AssessmentPipeline:
             # the prompt rather than from alignment quality. The vowel check
             # still runs: it reports how a word that *was* said was produced.
             mispronounced = self._check_vowel_identity(learner)
-            self._defer_to_vowels(learner, target_text, mispronounced)
+            self._defer_to_vowels(learner, target_text, mispronounced, poorly)
 
             # A word that was not produced cannot have been said differently.
             #
@@ -605,7 +605,8 @@ class AssessmentPipeline:
         return substitutions
 
     def _defer_to_vowels(self, learner: UtteranceAnalysis, target_text: str,
-                         mispronounced: list[str]) -> None:
+                         mispronounced: list[str],
+                         poorly: dict[str, float] | None = None) -> None:
         """Restore a prompt word the recogniser altered and the acoustics reject.
 
         Two components disagree about one slot, and the engine was believing the
@@ -639,7 +640,12 @@ class AssessmentPipeline:
             return _collapse_repeats(
                 "".join(c for c in decomposed if not unicodedata.combining(c)).lower())
 
-        flagged = set(mispronounced)
+        # Either check counts. The report marks a word CHECK VOWELS when the
+        # vowel classifier objects *or* the acoustic model fitted it badly, and
+        # consulting only the first meant a word flagged by GOP alone kept the
+        # recogniser's spelling and kept costing the learner marks -- which is
+        # exactly what `dàbọ̀` heard as `dàbò` did.
+        flagged = set(mispronounced) | set(poorly or {})
         if not flagged:
             return
         prompt_words = tokenize(normalize(target_text), keep_noise=False)
