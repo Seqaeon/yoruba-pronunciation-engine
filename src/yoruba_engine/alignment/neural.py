@@ -332,7 +332,29 @@ class NeuralAligner:
             log_posteriors = torch.log_softmax(logits, -1).cpu().numpy()
 
         sequence, optional, owner, words = self._states(transcript)
-        starts = viterbi(log_posteriors, sequence, optional, self.min_frames)
+        # The duration floor is a preference, not a requirement. Demanding three
+        # frames per phone refuses a recording that is merely fast: it rejected
+        # 24% of the training corpus, whose skipped utterances have a median
+        # duration of 0.35 s. A learner who hurries is not a learner the engine
+        # should decline to assess, so the floor is relaxed until the phones fit
+        # rather than raising.
+        starts = None
+        for floor in range(self.min_frames, 0, -1):
+            try:
+                starts = viterbi(log_posteriors, sequence, optional, floor)
+            except AlignmentError:
+                continue
+            if floor < self.min_frames:
+                logger.info("%s: %d frames could not hold %d phones at a "
+                            "%d-frame floor; aligned at %d",
+                            utt_id, len(log_posteriors), len(sequence),
+                            self.min_frames, floor)
+            break
+        if starts is None:
+            raise AlignmentError(
+                f"{utt_id}: {len(log_posteriors)} frames cannot hold "
+                f"{len(sequence)} phones even at one frame each; the recording "
+                "is shorter than the text requires")
         ends = np.append(starts[1:], len(log_posteriors))
 
         phones: list[Interval] = []
