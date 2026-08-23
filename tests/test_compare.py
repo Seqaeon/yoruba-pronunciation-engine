@@ -123,9 +123,31 @@ class TestComparisonEngine:
         reference = make_utterance("ref", [("òrí", [-4.0, 4.0])])
         learner = make_utterance("learner", [("órí", [4.0, 4.0])])
 
-        engine = ComparisonEngine(ScoringConfig(text_weight=0.2, tone_weight=0.8))
+        engine = ComparisonEngine(
+            ScoringConfig(text_weight=0.2, tone_weight=0.8, vowel_weight=0.0))
         result = engine.compare(reference, learner)
         assert result.overall_score == pytest.approx(0.2 * 1.0 + 0.8 * 0.5)
+
+    def test_vowel_accuracy_is_scored_when_it_was_measured(self):
+        reference = make_utterance("ref", [("òrí", [-4.0, 4.0])])
+        learner = make_utterance("learner", [("òrí", [-4.0, 4.0])])
+
+        engine = ComparisonEngine(
+            ScoringConfig(text_weight=0.4, tone_weight=0.4, vowel_weight=0.2))
+        result = engine.compare(reference, learner, vowel_accuracy=0.5)
+        assert result.overall_score == pytest.approx(0.4 * 1.0 + 0.4 * 1.0 + 0.2 * 0.5)
+
+    def test_unmeasured_vowels_do_not_count_as_zero(self):
+        """A recording whose vowels could not be judged must score as it did
+        before vowel identity was weighed, not be punished for a measurement
+        that never happened."""
+        reference = make_utterance("ref", [("òrí", [-4.0, 4.0])])
+        learner = make_utterance("learner", [("òrí", [-4.0, 4.0])])
+
+        engine = ComparisonEngine(
+            ScoringConfig(text_weight=0.4, tone_weight=0.4, vowel_weight=0.2))
+        result = engine.compare(reference, learner, vowel_accuracy=None)
+        assert result.overall_score == pytest.approx(1.0)
 
     def test_empty_reference_raises(self):
         reference = make_utterance("ref", [])

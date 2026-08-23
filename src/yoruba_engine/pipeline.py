@@ -396,9 +396,14 @@ class AssessmentPipeline:
         # prompt's: Whisper wrote ``bí`` for ``bíi``, which is not an error the
         # learner made. The prompted path keeps exact matching, where both
         # sequences come from the same text and any difference is real.
+        vowel_accuracy, vowel_errors = self._score_vowel_identity(learner, target_text)
         result = self.comparison_engine.compare(
             reference, learner,
-            tolerate_spelling=self.transcript_provider.recognizes_speech)
+            tolerate_spelling=self.transcript_provider.recognizes_speech,
+            vowel_accuracy=vowel_accuracy)
+        # Words carrying a confident vowel error join the ones the per-word check
+        # flagged, so the report marks them CHECK VOWELS as well as scoring them.
+        mispronounced = list(dict.fromkeys(list(mispronounced) + vowel_errors))
         result.utterance_id = utt_id
         result.undetected_words = dropped
         result.mispronounced_words = mispronounced
@@ -603,6 +608,89 @@ class AssessmentPipeline:
                             verdict.margin)
                 word.word = verdict.decoded
         return substitutions
+
+    def _score_vowel_identity(self, learner: UtteranceAnalysis,
+                              target_text: str) -> tuple[float | None, list[str]]:
+        """How many of the prompt's vowels the learner actually produced.
+
+        The existing vowel check verifies each word against *its own* spelling,
+        which with a recogniser is the word that was heard. That answers "is this
+        transcript self-consistent" and cannot answer "did you say the vowel the
+        prompt asked for" -- a learner reading ``dàbọ̀`` whose ``ọ`` came out as
+        ``o`` was transcribed ``dàbò``, and the check happily confirmed the
+        vowels matched ``dàbò``.
+
+        So this compares against the prompt's spelling instead, which is where
+        the required vowels are written.
+
+        **Only confident disagreements count.** The classifier is 93.1% accurate,
+        so roughly one vowel in fourteen is wrong; deducting on every objection
+        would tax correct speech more than it corrects wrong speech, which is why
+        vowel flags have always advised rather than scored. A vowel counts as an
+        error only when the classifier puts the required vowel below
+        ``max_confident_vowel_error`` while backing something else above
+        ``min_confident_vowel``. On the ``dàbọ̀`` recording that is o=0.91
+        against ọ=0.01 -- not a marginal call.
+
+        Returns:
+            The share of judged vowels that were produced as written, or ``None``
+            when nothing could be judged, and the words carrying a confident
+            error.
+        """
+        if self.vowel_verifier is None or not learner.words:
+            return None, []
+
+        from .g2p.dictionary import grapheme_to_phonemes  # noqa: PLC0415
+        from .g2p.orthography import is_noise_token, normalize, tokenize  # noqa: PLC0415
+
+        segmental = self.vowel_verifier.verify(learner.audio_path, learner.words)
+        if not segmental.distributions:
+            return None, []
+        index_of = getattr(self.vowel_verifier, "_label_index", None)
+        if not index_of:
+            return None, []
+
+        prompt_words = [w for w in tokenize(normalize(target_text), keep_noise=False)
+                        if not is_noise_token(w)]
+        scoring = self.config.scoring
+        judged = correct = 0
+        wrong: list[str] = []
+
+        for position, word in enumerate(learner.words):
+            distributions = segmental.distributions.get(position)
+            if not distributions or position >= len(prompt_words):
+                continue
+            try:
+                phonemes = grapheme_to_phonemes(prompt_words[position])
+            except Exception:
+                continue
+            expected = [p.symbol.split("_", 1)[0] for p in phonemes if p.is_vowel]
+            if len(expected) != len(distributions):
+                # The prompt and the aligned word disagree about how many vowels
+                # there are, so nothing can be compared position by position.
+                continue
+
+            for label, distribution in zip(expected, distributions):
+                slot = index_of.get(label)
+                if slot is None:
+                    continue
+                judged += 1
+                required = float(distribution[slot])
+                best = max(range(len(distribution)), key=distribution.__getitem__)
+                if (required < scoring.max_confident_vowel_error
+                        and float(distribution[best]) >= scoring.min_confident_vowel
+                        and best != slot):
+                    if word.word not in wrong:
+                        wrong.append(word.word)
+                else:
+                    correct += 1
+
+        if not judged:
+            return None, []
+        if wrong:
+            logger.info("%s: %d of %d prompt vowels confidently not produced (%s)",
+                        learner.utterance_id, judged - correct, judged, wrong)
+        return correct / judged, wrong
 
     def _defer_to_vowels(self, learner: UtteranceAnalysis, target_text: str,
                          mispronounced: list[str],

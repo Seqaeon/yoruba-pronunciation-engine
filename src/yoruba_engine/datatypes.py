@@ -280,3 +280,9 @@ class ComparisonResult:
     #: a recogniser produced one. This is what decides ``verified`` in that
     #: mode; ``learner_speech_coverage`` is still recorded but is not the gate.
     learner_phrase_resemblance: float | None = None
+
+    #: Share of the prompt's vowels the learner confidently produced, or ``None``
+    #: when none could be judged. Distinct from ``mispronounced_words``, which
+    #: checks each word against its own spelling and so cannot see a vowel the
+    #: recogniser spelled to match what was said.
+    vowel_accuracy: float | None = None

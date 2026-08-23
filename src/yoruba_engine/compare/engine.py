@@ -238,11 +238,15 @@ class ComparisonEngine:
         reference: UtteranceAnalysis,
         learner: UtteranceAnalysis,
         tolerate_spelling: bool = False,
+        vowel_accuracy: float | None = None,
     ) -> ComparisonResult:
         """Produce the full scored comparison.
 
         Args:
             tolerate_spelling: Ignore repeated letters when matching words.
+            vowel_accuracy: Share of the prompt's vowels the learner confidently
+                produced, from :meth:`AssessmentPipeline._score_vowel_identity`.
+                ``None`` leaves it out of the score rather than counting it zero.
                 Set for transcripts from a recogniser, whose spelling of a
                 correctly spoken word need not match the prompt's.
             reference: Analysed native-speaker rendition.
@@ -284,10 +288,17 @@ class ComparisonEngine:
         )
         tone_similarity = tone_comparison.accuracy
 
-        overall = (
-            self.scoring.text_weight * text_similarity
-            + self.scoring.tone_weight * tone_similarity
-        )
+        # Vowel identity joins the score only when it could be judged. Folding
+        # in a None as zero would punish a learner for a measurement that never
+        # happened; dropping the weight and renormalising keeps a recording with
+        # no usable pitch scoring exactly as it did before.
+        components = [(self.scoring.text_weight, text_similarity),
+                      (self.scoring.tone_weight, tone_similarity)]
+        if vowel_accuracy is not None:
+            components.append((self.scoring.vowel_weight, vowel_accuracy))
+        total_weight = sum(weight for weight, _ in components)
+        overall = (sum(weight * value for weight, value in components) / total_weight
+                   if total_weight else 0.0)
 
         word_pairs = [
             (
@@ -302,6 +313,7 @@ class ComparisonEngine:
             reference_transcript=reference.transcript,
             learner_transcript=learner.transcript,
             text_similarity=text_similarity,
+            vowel_accuracy=vowel_accuracy,
             tone_similarity=tone_similarity,
             overall_score=overall,
             word_pairs=word_pairs,

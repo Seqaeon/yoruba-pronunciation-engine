@@ -229,8 +229,14 @@ class SegmentalConfig:
 class ScoringConfig:
     """Weights for the composite pronunciation score."""
 
-    text_weight: float = 0.5
-    tone_weight: float = 0.5
+    text_weight: float = 0.4
+    tone_weight: float = 0.4
+
+    #: Weight on producing the prompt's vowels. Tone stays the largest single
+    #: concern -- it is what changes meaning in Yoruba -- but a learner saying
+    #: every word with the wrong vowels was previously scoring full marks with
+    #: only an advisory note beside them.
+    vowel_weight: float = 0.2
     #: Scores below this trigger "needs practice" feedback in the report.
     pass_threshold: float = 0.70
 
@@ -257,6 +263,18 @@ class ScoringConfig:
     #: It is also sensitive to dead air, because the denominator is the whole
     #: file: silence a learner leaves at either end counts against them. That is
     #: why browser recordings are trimmed before assessment.
+    #: A prompt vowel counts as not produced when the classifier puts it below
+    #: this while backing something else above ``min_confident_vowel``.
+    #:
+    #: Both bars are deliberately far apart. The classifier is 93.1% accurate,
+    #: so about one vowel in fourteen is wrong, and deducting on every objection
+    #: would tax correct speech more than it corrects wrong speech -- which is
+    #: why vowel flags advised rather than scored until now. The case this is
+    #: built for is not marginal: a learner producing /o/ where ``dàbọ̀`` needs
+    #: /ɔ/ scores o=0.91 against ọ=0.01.
+    max_confident_vowel_error: float = 0.15
+    min_confident_vowel: float = 0.70
+
     min_speech_coverage: float = 0.35
 
     #: How much a recognised transcript must sound like the prompt before the
@@ -345,9 +363,15 @@ class ScoringConfig:
     min_duration_fraction: float = 0.7
 
     def __post_init__(self) -> None:
-        total = self.text_weight + self.tone_weight
+        # All three, because vowel identity is now scored rather than merely
+        # noted. A recording where vowels could not be judged drops that weight
+        # and renormalises the other two, so the sum still has to be 1.0 here.
+        total = self.text_weight + self.tone_weight + self.vowel_weight
         if abs(total - 1.0) > 1e-6:
-            raise ValueError(f"Scoring weights must sum to 1.0, got {total}")
+            raise ValueError(
+                f"Scoring weights must sum to 1.0, got {total} "
+                f"(text {self.text_weight}, tone {self.tone_weight}, "
+                f"vowel {self.vowel_weight})")
 
 
 def _default_mfa_executable() -> str:
