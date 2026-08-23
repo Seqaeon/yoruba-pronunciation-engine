@@ -58,8 +58,19 @@ FRAME_S = 0.02
 SILENCE = "sil"
 SILENCE_LABELS = {"", "sil", "sp", "spn", "<eps>"}
 
+#: Tone sits on vowels *and* syllabic nasals -- ``ń`` in ``Mo ń bọ̀`` is a
+#: syllable carrying High. The acoustic model is tone-stripped, so ``n_H``
+#: collapses to ``n`` and becomes indistinguishable from the consonant, and the
+#: engine dropped it: no pitch measured, no tone feedback, on 1% of tone-bearing
+#: units and two of the app's twenty practice phrases.
+#:
+#: The TextGrids cannot say which ``n`` is which, but the transcript can. The
+#: G2P marks a syllabic nasal as a vowel, so aligning its phone sequence with the
+#: TextGrid's recovers the distinction, and the aligner learns a separate class.
+SYLLABIC_SUFFIX = "~"
 
-def frame_labels(intervals, duration_s: float, index_of: dict) -> np.ndarray:
+
+def frame_labels(pairs, duration_s: float, index_of: dict) -> np.ndarray:
     """One label per 20 ms frame, from a TextGrid's phone tier.
 
     A frame takes the phone covering its midpoint, which is the rule the pitch
@@ -68,9 +79,8 @@ def frame_labels(intervals, duration_s: float, index_of: dict) -> np.ndarray:
     """
     frames = max(int(duration_s / FRAME_S), 1)
     labels = np.zeros(frames, dtype=np.int16)
-    for interval in intervals:
-        label = interval.label.strip()
-        target = index_of[SILENCE if label in SILENCE_LABELS else label]
+    for interval, label in pairs:
+        target = index_of[label]
         first = max(int(interval.start_s / FRAME_S), 0)
         last = min(int(np.ceil(interval.end_s / FRAME_S)) + 1, frames)
         for frame in range(first, last):
@@ -78,6 +88,32 @@ def frame_labels(intervals, duration_s: float, index_of: dict) -> np.ndarray:
             if interval.start_s <= midpoint < interval.end_s:
                 labels[frame] = target
     return labels
+
+
+def syllabic_positions(transcript: str) -> list[bool]:
+    """Which of a transcript's phones are syllabic nasals, in order.
+
+    The G2P is the authority: it marks a syllabic nasal as tone-bearing where a
+    consonantal one is not. This returns one flag per non-silence phone, to be
+    zipped against the TextGrid's phone tier.
+    """
+    from yoruba_engine.g2p.dictionary import grapheme_to_phonemes  # noqa: PLC0415
+    from yoruba_engine.g2p.orthography import (  # noqa: PLC0415
+        is_noise_token, normalize, tokenize,
+    )
+
+    flags: list[bool] = []
+    for token in tokenize(normalize(transcript), keep_noise=False):
+        if is_noise_token(token):
+            continue
+        try:
+            phonemes = grapheme_to_phonemes(token)
+        except Exception:
+            return []          # an unmappable word makes the whole zip unsafe
+        for phoneme in phonemes:
+            base = phoneme.symbol.split("_", 1)[0]
+            flags.append(bool(phoneme.is_vowel) and base in {"n", "m"})
+    return flags
 
 
 def main() -> int:
@@ -101,11 +137,38 @@ def main() -> int:
 
     # One pass to learn the phone inventory, so class indices are stable across
     # runs and the count is reported rather than assumed.
+    def relabelled(grid, transcript):
+        """The TextGrid's phones, with syllabic nasals given their own label.
+
+        Returns ``None`` when the transcript's phone count and the TextGrid's
+        disagree: a mismatch means the two are describing different things, and
+        zipping them would silently mislabel every phone after the divergence.
+        """
+        intervals = parse_textgrid(grid).get("phones", [])
+        spoken = [i for i in intervals if i.label.strip() not in SILENCE_LABELS]
+        flags = syllabic_positions(transcript)
+        if len(flags) != len(spoken):
+            flags = []
+        marks = dict(zip((id(i) for i in spoken), flags)) if flags else {}
+        out = []
+        for interval in intervals:
+            label = interval.label.strip()
+            if label in SILENCE_LABELS:
+                out.append((interval, SILENCE))
+            elif marks.get(id(interval)):
+                out.append((interval, label + SYLLABIC_SUFFIX))
+            else:
+                out.append((interval, label))
+        return out
+
+    def transcript_for(grid):
+        lab = args.audio / grid.parent.name / f"{grid.stem}.lab"
+        return lab.read_text(encoding="utf-8").strip() if lab.exists() else ""
+
     seen: Counter = Counter()
     for grid in grids[:min(len(grids), 5000)]:
-        for interval in parse_textgrid(grid).get("phones", []):
-            label = interval.label.strip()
-            seen[SILENCE if label in SILENCE_LABELS else label] += 1
+        for _, label in relabelled(grid, transcript_for(grid)):
+            seen[label] += 1
     vocabulary = [SILENCE] + sorted(k for k in seen if k != SILENCE)
     index_of = {label: position for position, label in enumerate(vocabulary)}
     print(f"{len(vocabulary)} classes: {' '.join(vocabulary)}", flush=True)
@@ -122,17 +185,16 @@ def main() -> int:
             continue
         try:
             info = sf.info(str(wav))
-            phones = [i for i in parse_textgrid(grid).get("phones", [])
-                      if (i.label.strip() in SILENCE_LABELS
-                          or i.label.strip() in index_of)]
+            pairs = [(i, label) for i, label in relabelled(grid, transcript_for(grid))
+                     if label in index_of]
         except Exception:
             skipped += 1
             continue
-        if not phones:
+        if not pairs:
             skipped += 1
             continue
 
-        labels = frame_labels(phones, info.frames / info.samplerate, index_of)
+        labels = frame_labels(pairs, info.frames / info.samplerate, index_of)
         if labels.size < 5:
             skipped += 1
             continue

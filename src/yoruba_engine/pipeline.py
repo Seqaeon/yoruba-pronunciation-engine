@@ -159,14 +159,29 @@ class AssessmentPipeline:
     def _load_tone_classifier(use_tone_classifier: bool | None):
         """Load the trained tone classifier according to the requested policy.
 
-        The classifier is roughly 11 points more accurate than the threshold
-        rules on held-out speakers, but it needs a model file and scikit-learn,
-        so its absence must never be fatal in the default configuration.
+        Three implementations, best first, each falling back to the next when its
+        model or its dependencies are missing. None of them may be fatal by
+        default: tone is the engine's whole point, and a missing file should
+        degrade the reading rather than refuse to give one.
+
+        The sequence model reads a whole utterance at once and reaches 79.0% on
+        held-out speakers where the per-unit tree reaches 69.6%. That gap is
+        representational rather than informational -- eight times more data moved
+        the tree 69.6% to 70.2%, because Yoruba tone is relative and a model
+        seeing one unit plus three lag features cannot represent declination.
+
+        The threshold rules remain below both, and remain the floor that works
+        with no model file and no torch at all.
         """
         if use_tone_classifier is False:
             return None
 
         from .tone.classifier import DEFAULT_MODEL_PATH, ToneClassifier  # noqa: PLC0415
+        from .tone.sequence import ToneSequenceClassifier  # noqa: PLC0415
+
+        sequence = ToneSequenceClassifier.load()
+        if sequence is not None:
+            return sequence
 
         if use_tone_classifier is None and not DEFAULT_MODEL_PATH.exists():
             logger.info(

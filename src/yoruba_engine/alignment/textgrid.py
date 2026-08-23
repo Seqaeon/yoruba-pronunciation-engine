@@ -138,3 +138,55 @@ def alignment_from_textgrid(path: Path, utterance_id: str | None = None) -> Alig
         words=drop_silence(words),
         phones=drop_silence(phones),
     )
+
+
+def mark_syllabic_nasals(alignment: Alignment, transcript: str) -> Alignment:
+    """Relabel syllabic nasals in an alignment, in place.
+
+    Tone in Yoruba sits on tone-bearing units, which are vowels *and* syllabic
+    nasals: ``ń`` in ``Mo ń bọ̀`` is a syllable carrying High. The acoustic model
+    is tone-stripped, so ``n_H`` reaches a TextGrid as a bare ``n`` that nothing
+    can tell from the consonant in ``ìnú``, and everything downstream treated it
+    as a consonant.
+
+    The cost was larger than one missing unit per nasal. ``tone_pattern`` counts
+    a syllabic nasal as tone-bearing while the alignment did not, so the two
+    disagreed on how many units a word had -- and a word whose written pattern
+    and vowel count disagree is dropped from tone training entirely. Every word
+    containing ``ń`` was being discarded, not merely under-measured.
+
+    The TextGrid cannot recover the distinction on its own; the transcript can,
+    because the G2P marks a syllabic nasal as tone-bearing. This zips the two,
+    and refuses when their phone counts disagree -- a divergence would mislabel
+    every phone after it, which is worse than leaving them all as consonants.
+
+    Args:
+        alignment: Phone intervals from forced alignment.
+        transcript: What was said, in Yoruba orthography.
+
+    Returns:
+        The same alignment, with syllabic nasals labelled ``n~`` or ``m~``.
+    """
+    from ..g2p.dictionary import grapheme_to_phonemes  # noqa: PLC0415
+    from ..g2p.orthography import is_noise_token, normalize, tokenize  # noqa: PLC0415
+
+    flags: list[bool] = []
+    for token in tokenize(normalize(transcript or ""), keep_noise=False):
+        if is_noise_token(token):
+            continue
+        try:
+            phonemes = grapheme_to_phonemes(token)
+        except Exception:
+            return alignment          # one unmappable word makes the zip unsafe
+        for phoneme in phonemes:
+            base = phoneme.symbol.split("_", 1)[0]
+            flags.append(bool(phoneme.is_vowel) and base in {"n", "m"})
+
+    spoken = [p for p in alignment.phones if p.label not in SILENCE_LABELS]
+    if len(flags) != len(spoken):
+        return alignment
+
+    for phone, syllabic in zip(spoken, flags):
+        if syllabic and not phone.label.endswith("~"):
+            phone.label = phone.label + "~"
+    return alignment

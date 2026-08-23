@@ -34,7 +34,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from yoruba_engine.alignment.textgrid import alignment_from_textgrid  # noqa: E402
+from yoruba_engine.alignment.textgrid import (
+    alignment_from_textgrid,
+    mark_syllabic_nasals,
+)  # noqa: E402
 from yoruba_engine.audit.dataset_audit import DatasetAuditor  # noqa: E402
 from yoruba_engine.config import EngineConfig  # noqa: E402
 from yoruba_engine.datatypes import Tone  # noqa: E402
@@ -128,6 +131,11 @@ def collect(config: EngineConfig, aligned_dir: Path, limit: int | None,
 
         try:
             alignment = alignment_from_textgrid(textgrid, utterance_id=utterance.utterance_id)
+            # Syllabic nasals carry tone. Without this they read as consonants,
+            # and every word containing one is dropped for a syllable-count
+            # mismatch -- which would make this an unfair baseline for the
+            # sequence model as much as a weaker classifier.
+            mark_syllabic_nasals(alignment, utterance.text)
             words, _ = extractor.extract(utterance.audio_path, alignment)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop training
             logger.debug("Skipping %s: %s", textgrid.name, exc)

@@ -34,6 +34,19 @@ _TONELESS_VOWELS = frozenset(
     {"a", "e", "E", "i", "o", "O", "u", "an", "en", "En", "in", "on", "On", "un"}
 )
 
+#: The syllabic nasal, kept as its own tone-stripped label.
+#:
+#: Tone in Yoruba sits on tone-bearing units, which are vowels *and* syllabic
+#: nasals -- ``ń`` in ``Mo ń bọ̀`` carries High and is a syllable of its own.
+#: Stripping tone collapses ``n_H`` to ``n``, which cannot be told from the
+#: consonant in ``omi n...``, so this project previously dropped it and measured
+#: no pitch over it at all. Two of the app's twenty practice phrases use ``ń``,
+#: and a learner practising them got silence where feedback belonged.
+#:
+#: The aligner now emits a distinct label for it, so the two are separable
+#: without reintroducing tone into the phone set.
+SYLLABIC_NASAL_LABELS = frozenset({"n~", "m~"})
+
 
 def is_vowel_phone(label: str) -> bool:
     """Whether an MFA phone label denotes a tone-bearing (vowel) segment.
@@ -41,14 +54,15 @@ def is_vowel_phone(label: str) -> bool:
     Handles both dictionary styles. With tone-suffixed phones the label ends in
     ``_H``/``_M``/``_L``; with tone-stripped phones it is the bare vowel.
 
-    Note that the syllabic nasal is only recognized in the tone-suffixed style
-    (``n_H``). Once stripped it collapses to ``n``, which is indistinguishable
-    from the consonant, so it is excluded rather than risk measuring pitch over
-    consonantal nasals.
+    Syllabic nasals count, because Yoruba tone sits on them as it does on
+    vowels. In the tone-suffixed style they arrive as ``n_H``; tone-stripped
+    they arrive as ``n~``, a label the aligner emits precisely so a syllabic
+    ``n`` stays distinguishable from a consonantal one. A bare ``n`` is still
+    treated as a consonant, because nothing in that label says otherwise.
     """
     if label.endswith(_VOWEL_SUFFIXES):
         return True
-    return label in _TONELESS_VOWELS
+    return label in _TONELESS_VOWELS or label in SYLLABIC_NASAL_LABELS
 
 
 def hz_to_semitones(f0_hz: float, reference_hz: float) -> float:

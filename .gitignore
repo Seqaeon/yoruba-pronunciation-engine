@@ -24,6 +24,14 @@ data/mfa_corpus/
 models/*.zip
 models/*.joblib
 
+# The frame aligner and the tone sequence model are exceptions: 2.2 MB and
+# 1.1 MB. Both are heads over encoders that are fetched separately, so they are
+# small enough to live in the repository, and keeping them here means a clone
+# gets sub-second alignment and the better tone model without a release step.
+!models/frame_aligner.pt
+!models/tone_sequence.pt
+!models/gop_reference_neural.json
+
 # Feature caches from training. Regenerable with scripts/extract_vowel_features.py
 # and useless without the audio they were measured from, so they do not belong in
 # the repository -- and at ~28 MB they would dwarf everything that does.

@@ -60,14 +60,23 @@ SAMPLE_RATE = 16000
 SILENCE = "sil"
 
 
-def _strip_tone(symbol: str) -> str:
-    """``a_H`` becomes ``a``.
+def _phone_label(phoneme) -> str:
+    """The aligner's label for one G2P phoneme.
 
-    The G2P emits tone-suffixed symbols; the acoustic model was trained
-    tone-stripped, because MFCCs discard F0 and a GMM cannot see the difference
-    anyway. Tone is measured from pitch, separately.
+    ``a_H`` becomes ``a``: the G2P emits tone-suffixed symbols, and the acoustic
+    model was trained tone-stripped because MFCCs discard F0 and a GMM cannot see
+    the difference anyway. Tone is measured from pitch, separately.
+
+    A syllabic nasal becomes ``n~`` rather than ``n``. Tone sits on it as it does
+    on a vowel -- ``ń`` in ``Mo ń bọ̀`` is a syllable carrying High -- and
+    collapsing it into the consonant is why the engine measured no pitch there at
+    all. The G2P is what knows the difference, so it is applied here rather than
+    guessed from the label.
     """
-    return symbol.split("_", 1)[0]
+    base = phoneme.symbol.split("_", 1)[0]
+    if phoneme.is_vowel and base in {"n", "m"}:
+        return base + "~"
+    return base
 
 
 def viterbi(log_posteriors: np.ndarray, sequence: np.ndarray,
@@ -273,7 +282,12 @@ class NeuralAligner:
         for position, word in enumerate(words):
             phonemes = grapheme_to_phonemes(word)
             for phoneme in phonemes:
-                label = _strip_tone(phoneme.symbol)
+                label = _phone_label(phoneme)
+                # A head trained before syllabic nasals were split has no ``n~``
+                # class. Falling back keeps that pairing working rather than
+                # refusing to align.
+                if label not in index_of and label.endswith("~"):
+                    label = label[:-1]
                 if label not in index_of:
                     raise AlignmentError(
                         f"Phone {label!r} from {word!r} is not in the aligner's "
