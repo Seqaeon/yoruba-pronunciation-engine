@@ -295,41 +295,7 @@ for r in sorted(results, key=lambda r: -r["per_word"]):
 print("\\nThe bar, from the shipped model with prompt context:")
 print("  97% per-word   88% whole phrase   98% sub-dots   ~1.0 s on 16 CPU cores")"""),
 
-md("""## Result, 96 readings on a Kaggle GPU
-
-| model | params | ctx | per-word | phrase | sub-dots | s/utt | parroted |
-|---|---|---|---|---|---|---|---|
-| **whisper-small-yoruba (shipped)** | 242M | yes | **97%** | **87%** | **95%** | 0.26 | 0% |
-| NCAIR1/Yoruba-ASR | 242M | no | 91% | 68% | 91% | 0.28 | 0% |
-| whisper-medium-yoruba | 764M | no | 86% | 55% | 89% | 0.61 | 0% |
-| whisper-small-yoruba (shipped) | 242M | no | 82% | 48% | 95% | 0.28 | 0% |
-| Largev2-Decodis_Comb_FT | 1543M | yes | 67% | 28% | **15%** | 0.51 | 4% |
-| Largev2-Decodis_Comb_FT | 1543M | no | 62% | 18% | **0%** | 0.47 | 0% |
-| large-v3-yoruba-v3 | 1543M | yes | 61% | 27% | 68% | 0.91 | 3% |
-| large-v3-yoruba-v3 | 1543M | no | 56% | 15% | 52% | 0.79 | 0% |
-| whisper-medium-yoruba | 764M | yes | 44% | 35% | 33% | 0.61 | **60%** |
-| NCAIR1/Yoruba-ASR | 242M | yes | 31% | 20% | 38% | 0.29 | **65%** |
-
-**Size is not the variable.** Both 1.55B models score below the 242M one
-*unconditioned*, and one of them emits **no sub-dots at all** -- 0% of 219. A
-model that cannot write `ọ` cannot teach the distinction between `ọ` and `o`,
-whatever its word accuracy. These are Colab-scale uploads with single-digit
-download counts and no published WER, and it shows.
-
-**Only the shipped model can use the prompt.** Conditioning takes it from 82% to
-97%, and every other candidate either parrots (medium 60%, NCAIR 65% return the
-prompt and stop) or degrades. That 15-point gain is unavailable to anything else
-here, so a candidate is really competing against 97% while capped at its own
-unconditioned score.
-
-**NCAIR is the only near-miss**, at 91% and 91% sub-dots unconditioned -- a
-genuinely better standalone recogniser than whisper-small unconditioned, and
-still six points behind what is deployed.
-
-The conclusion is to change nothing. Recorded here so the question does not get
-asked a third time.
-
-## Reading the result
+md("""## Reading the result
 
 **A win on per-word alone is not a reason to switch.** Check three things:
 

@@ -477,8 +477,9 @@ too imprecise for tone measurement.
 
 It is not deep learning. MFA's trainer is a GMM-HMM (Kaldi) pipeline that runs on
 CPU in hours, and trains on your own audio plus transcripts with no extra
-labelling. `notebooks/train_mfa_yoruba.ipynb` walks through it end to end,
-including tone-detector validation and threshold tuning.
+labelling. `scripts/train_acoustic_model.py` runs it, with tone-detector
+validation and threshold tuning in `scripts/calibrate_gop.py` and
+`scripts/measure_alignment_stats.py`.
 
 Nothing else in the pipeline needs training. G2P, pitch extraction, tone
 classification, and scoring are all rule-based or signal processing.
@@ -583,7 +584,7 @@ src/yoruba_engine/
 ├── report/             # stage 7
 └── asr/                # transcript providers (ASR placeholder)
 
-notebooks/train_mfa_yoruba.ipynb   # acoustic model training
+scripts/make_*_notebook.py         # generators for the training notebooks
 data/corpus/                       # your dataset (placeholder provided)
 data/dictionary/                   # generated dict + manual overrides
 models/                            # trained acoustic model
