@@ -131,7 +131,28 @@ def align_words(reference: list[str], learner: list[str],
     """
     def key(word: str) -> str:
         stripped = strip_tones(word)
-        return _collapse_repeats(stripped) if tolerate_spelling else stripped
+        if not tolerate_spelling:
+            return stripped
+        # With a recogniser, also ignore sub-dots. They are phonemic -- ọ is /ɔ/
+        # and o is /o/ -- so this is a real concession, made because the error it
+        # prevents is worse than the one it allows.
+        #
+        # A learner reading `ó dàbọ̀` was transcribed `ó dàbò` and scored 50% on
+        # a two-word phrase, told they had said the wrong word. They had not:
+        # they said the right word and produced one vowel as /o/, which the vowel
+        # classifier confirms at 0.91 against 0.01 for /ɔ/. Word identity is not
+        # the channel that error belongs in, and it is already reported by the
+        # vowel panel, by CHECK VOWELS, and by the minimal-pair check.
+        #
+        # The cost is that a genuine minimal pair -- `òkun` against `ọkun` --
+        # scores as the same word here. That pair differs by exactly the same
+        # single sub-dot, so no rule can separate them at this level; the vowel
+        # classifier is what distinguishes them, and it still does.
+        import unicodedata  # noqa: PLC0415
+
+        decomposed = unicodedata.normalize("NFD", stripped)
+        without_dots = "".join(c for c in decomposed if not unicodedata.combining(c))
+        return _collapse_repeats(unicodedata.normalize("NFC", without_dots))
 
     ref_keys = [key(w) for w in reference]
     learner_keys = [key(w) for w in learner]

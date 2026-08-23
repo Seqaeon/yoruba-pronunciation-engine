@@ -65,6 +65,32 @@ def _expected_pattern(word) -> str:
     return word.pattern_string()
 
 
+def _diacritics_only(reference: str | None, learner: str | None) -> bool:
+    """Whether two spellings differ only in tone marks and sub-dots.
+
+    ``dàbọ̀`` and ``dàbò`` differ by one sub-dot; ``òkun`` and ``ọkàn`` differ by
+    a whole vowel. The first is the same word produced with the wrong vowel
+    quality, the second is a different word, and a report that calls both
+    DIFFERENT is telling a learner the wrong thing half the time.
+
+    This does not excuse the error -- the vowel and tone panels still report it.
+    It decides which of the two mistakes the learner is told they made.
+    """
+    if not reference or not learner:
+        return False
+    import unicodedata  # noqa: PLC0415
+
+    from ..compare.engine import _collapse_repeats  # noqa: PLC0415
+    from ..g2p.orthography import normalize, strip_tones  # noqa: PLC0415
+
+    def bare(word: str) -> str:
+        decomposed = unicodedata.normalize("NFD", strip_tones(normalize(word)))
+        return _collapse_repeats(
+            "".join(c for c in decomposed if not unicodedata.combining(c)).lower())
+
+    return reference != learner and bare(reference) == bare(learner)
+
+
 def alignment_rows(result: ComparisonResult) -> list[dict[str, str | None]]:
     """The word-alignment table, as rows of reference, learner and status.
 
@@ -148,6 +174,14 @@ def alignment_rows(result: ComparisonResult) -> list[dict[str, str | None]]:
             # here too -- a tonal error is reported in its own section rather
             # than as a wrong word.
             status = "ok"
+        elif _diacritics_only(ref_word, learner_word):
+            # The same word with a different vowel or tone, not a different
+            # word. `dàbọ̀` heard as `dàbò` is one sub-dot: /ɔ/ produced as /o/.
+            # Calling that DIFFERENT tells a learner they said the wrong word,
+            # which is both false and the wrong correction -- they said the
+            # right word and shaped one vowel wrong, which is what CHECK VOWELS
+            # means and what the tone and vowel panels then explain.
+            status = "CHECK VOWELS"
         else:
             # Two independent signals agree: the recogniser wrote a different
             # word, and the vowel check did not object to it -- the audio in
