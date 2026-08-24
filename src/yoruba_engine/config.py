@@ -363,6 +363,59 @@ class ScoringConfig:
     #: thing, which is what the resemblance and coverage checks are for.
     min_dynamic_range_db: float = 6.0
 
+    #: How well the audio has to fit the prompt's phones, as a mean GOP z-score
+    #: against native production, before the attempt is believed.
+    #:
+    #: The text checks cannot settle this on a short prompt. Verification by
+    #: character resemblance was set on multi-word phrases, where a genuine
+    #: attempt scores 0.67-0.97 and an unrelated one 0.13-0.43. One word has no
+    #: such gap: room noise transcribed as `gbàgbá` against the prompt `igbà`
+    #: resembles it 0.60, over the 0.55 bar, because short strings share
+    #: characters by chance. Measured on 100 corpus recordings of *other*
+    #: phrases scored against the one-word prompt `Igbà`, 17% came back at 50%
+    #: or better and 5% at 80% or better.
+    #:
+    #: Forced alignment will place the prompt's phones on any audio, but it
+    #: cannot make them fit. GOP measures that fit against how native speakers
+    #: produce the same phones, so it asks the question the text cannot:
+    #:
+    #:     corpus against its own text        median -0.14,  5th pct -1.23
+    #:     igba reference clips               median  0.23
+    #:     corpus against the wrong prompt    median -1.94, 95th pct -0.39
+    #:
+    #: Rejecting below -1.25 turns away 72% of wrong-prompt recordings for 5% of
+    #: genuine ones, and none of the five one-word reference clips. Unlike the
+    #: resemblance check this needs no recogniser and does not care how long the
+    #: prompt is, so it also covers the prompted mode.
+    #:
+    #: It is a fit test, not a tone test: a learner who says the right word with
+    #: the wrong tone still fits the phones, and is scored on tone as before.
+    min_mean_gop_z: float = -1.25
+
+    #: How much of the recording a *one-word* prompt has to occupy.
+    #:
+    #: Coverage is enforced only when there is no recogniser, because on a
+    #: sentence it is a weak proxy -- 72% balanced accuracy -- and it reads the
+    #: silence at the ends of a browser recording as evidence of a wrong phrase.
+    #: On a one-word prompt it is neither weak nor a proxy. The word either
+    #: fills the recording or it does not, and when the audio is a sentence or
+    #: noise the aligner parks the word in a fraction of it and calls the rest
+    #: silence.
+    #:
+    #: Measured against the one-word prompt `Igbà`, on recordings of other
+    #: phrases that still scored 50% or better:
+    #:
+    #:     heard `gbélá`   87%   coverage 34%
+    #:     heard `gba`     84%   coverage 33%
+    #:     heard `bá`      77%   coverage 40%
+    #:     heard `agbóná`  74%   coverage 17%
+    #:     genuine one-word attempts        coverage 84-85%
+    #:
+    #: This is safe here only because the app trims silence from both ends
+    #: before the engine sees the recording, so coverage measures speech rather
+    #: than how long the learner waited before speaking.
+    min_one_word_coverage: float = 0.60
+
     #: How much a recognised transcript must sound like the prompt before the
     #: attempt counts as an attempt at that phrase at all.
     #:

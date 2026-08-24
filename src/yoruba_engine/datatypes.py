@@ -367,6 +367,11 @@ class ComparisonResult:
     #: numbers a learner reasonably read as partial credit for saying nothing.
     tone_similarity_applicable: bool = True
 
+    #: Mean GOP z-score over the aligned phones: how well the audio fits the
+    #: prompt, measured against native production. Recorded whether or not it
+    #: decided the outcome, because it is worth reporting either way.
+    mean_gop_z: float | None = None
+
     verified: bool = True
     verification_note: str | None = None
     learner_speech_coverage: float | None = None

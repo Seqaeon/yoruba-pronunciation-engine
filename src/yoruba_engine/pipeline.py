@@ -1027,6 +1027,111 @@ class AssessmentPipeline:
         else:
             self._verify_by_coverage(result)
 
+        # Whatever the text said, the audio still has to fit the prompt's
+        # phones. These run last and can only tighten the verdict, never loosen
+        # one already refused.
+        if result.verified:
+            self._verify_by_goodness(result, learner)
+        if result.verified:
+            self._verify_one_word_fills_recording(result)
+
+    def _verify_one_word_fills_recording(self, result: ComparisonResult) -> None:
+        """Reject a one-word prompt that occupies little of the recording.
+
+        The text checks are blind here: `igbà` against room noise transcribed as
+        `gbàgbá` resembles the prompt 0.60, over the 0.55 bar, because short
+        strings share characters by chance. Goodness does not catch it either,
+        because the aligner places the word in whichever half-second fits best
+        and marks the rest silence -- so the phones it scores really do fit.
+
+        What gives it away is how little of the recording that half-second is.
+        See :attr:`~yoruba_engine.config.ScoringConfig.min_one_word_coverage`.
+        """
+        if len(normalize(result.reference_transcript).split()) != 1:
+            return
+
+        # Not when the recogniser heard the prompt word itself. Low coverage
+        # then means the learner left silence around a word they said correctly,
+        # which is the reason the recognising path ignores coverage in the first
+        # place. Only an inexact recognition is asked to also fill the
+        # recording, and every false accept measured had one: `gbélá`, `gba`,
+        # `bá`, `agbóná` against the prompt `igbà`.
+        heard = normalize(result.learner_transcript or "")
+        if heard and heard == normalize(result.reference_transcript):
+            return
+
+        coverage = result.learner_speech_coverage
+        if coverage is None or coverage >= self.config.scoring.min_one_word_coverage:
+            return
+
+        result.verified = False
+        result.verification_note = (
+            f"The prompt is one word, but it accounts for only {coverage:.0%} of "
+            "the recording. That usually means something else was said, or "
+            "nothing was.")
+        self._withhold_score(result)
+        logger.warning("Utterance %s failed verification: one-word coverage %.2f",
+                       result.utterance_id, coverage)
+
+    def _verify_by_goodness(self, result: ComparisonResult,
+                            learner: UtteranceAnalysis) -> None:
+        """Reject an attempt whose audio does not fit the prompt's phones.
+
+        Forced alignment places the prompt on any recording it is given; it
+        cannot make it fit. GOP measures that fit against how native speakers
+        produce the same phones, which is the question the text checks cannot
+        answer on a short prompt -- see
+        :attr:`~yoruba_engine.config.ScoringConfig.min_mean_gop_z`.
+        """
+        reference = getattr(self, "gop_reference", None)
+        if reference is None or not learner.phone_scores:
+            return
+
+        # Against the *prompt*, not against whatever was aligned.
+        #
+        # Wiring this to learner.phone_scores first was useless: when the
+        # recogniser's text is what got aligned -- which is exactly the case
+        # where the learner said something else -- GOP measures how well the
+        # audio fits the words they actually said, and that fits well. It
+        # rejected 2 of 100 wrong-prompt recordings.
+        #
+        # The question is whether the audio fits *this prompt*, so the prompt is
+        # what has to be aligned to ask it. The extra alignment costs about
+        # 40 ms with the neural aligner.
+        scores = learner.phone_scores
+        prompt = result.reference_transcript
+        if normalize(learner.transcript or "") != normalize(prompt):
+            try:
+                against_prompt = self.aligner.align_single(
+                    learner.audio_path, prompt,
+                    utterance_id=f"{result.utterance_id}_fit", collect_gop=True)
+            except Exception:
+                return          # cannot ask the question; do not answer it
+            if not against_prompt.phone_scores:
+                return
+            scores = against_prompt.phone_scores
+
+        values = [z for z in (reference.z_score(score) for score in scores)
+                  if z is not None]
+        if len(values) < self.config.gop.min_scored_phones:
+            return
+
+        import statistics as stats  # noqa: PLC0415
+
+        mean = stats.mean(values)
+        result.mean_gop_z = round(mean, 2)
+        if mean >= self.config.scoring.min_mean_gop_z:
+            return
+
+        result.verified = False
+        result.verification_note = (
+            f"The recording does not sound like this phrase: the acoustic model "
+            f"rates its fit at {mean:.2f} against native production, where "
+            f"{self.config.scoring.min_mean_gop_z:.2f} is the least it accepts.")
+        self._withhold_score(result)
+        logger.warning("Utterance %s failed verification: mean GOP z %.2f",
+                       result.utterance_id, mean)
+
     def _verify_by_recognition(self, result: ComparisonResult) -> None:
         """Reject an attempt that does not sound like the prompt at all.
 
