@@ -270,6 +270,14 @@ class ToneAnalyzer:
         matched = 0
         total = 0
 
+        # Whether this recording can say where the speaker's tone levels sit.
+        # The same threshold the declination fit uses, for the same reason: below
+        # four measured vowels there is not enough spread to fit anything to.
+        register_measurable = sum(
+            1 for word in learner for vowel in word.vowels
+            if vowel.mean_semitones is not None
+        ) >= 4
+
         for ref_index, learner_index in word_pairs:
             if ref_index is None or learner_index is None:
                 continue  # a missing/extra word is a text error, not a tone error
@@ -319,6 +327,43 @@ class ToneAnalyzer:
                 if expected == learner_vowel.detected_tone:
                     matched += 1
                 elif learner_vowel.confidence >= self.config.min_confidence:
+                    # Record the movement into this vowel as well as the label.
+                    # On a short prompt the label is the shakier of the two --
+                    # it needs a register the recording cannot supply -- while
+                    # the interval is a difference and needs none. See
+                    # ToneError.describe_movement.
+                    order = {Tone.LOW: 0, Tone.MID: 1, Tone.HIGH: 2}
+                    step = expected_step = None
+                    to_next = False
+
+                    def target_at(position):
+                        if position < 0 or position >= len(ref_word.vowels):
+                            return Tone.UNKNOWN
+                        return (written[position] if usable
+                                else ref_word.vowels[position].detected_tone)
+
+                    def level_at(position):
+                        if position < 0 or position >= len(learner_word.vowels):
+                            return None
+                        return learner_word.vowels[position].mean_semitones
+
+                    # Look back if there is a vowel behind, forward otherwise. A
+                    # first vowel has nothing behind it, and that is where both
+                    # of the igba set's errors land, so looking only backwards
+                    # produced the interval exactly never.
+                    neighbour = vowel_index - 1
+                    if neighbour < 0:
+                        neighbour, to_next = vowel_index + 1, True
+
+                    here, there = level_at(vowel_index), level_at(neighbour)
+                    neighbour_target = target_at(neighbour)
+                    if (here is not None and there is not None
+                            and neighbour_target is not Tone.UNKNOWN):
+                        step = (there - here) if to_next else (here - there)
+                        change = ((order[neighbour_target] - order[expected]) if to_next
+                                  else (order[expected] - order[neighbour_target]))
+                        expected_step = ("rise" if change > 0
+                                         else "fall" if change < 0 else "level")
                     errors.append(
                         ToneError(
                             word=ref_word.word,
@@ -326,6 +371,10 @@ class ToneAnalyzer:
                             vowel_index=vowel_index,
                             expected=expected,
                             detected=learner_vowel.detected_tone,
+                            measured_step_st=step,
+                            expected_step=expected_step,
+                            step_to_next=to_next,
+                            register_measurable=register_measurable,
                         )
                     )
                 else:

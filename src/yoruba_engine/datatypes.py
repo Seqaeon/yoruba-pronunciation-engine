@@ -221,14 +221,90 @@ class ToneError:
     expected: Tone
     detected: Tone
 
+    #: How far this vowel sat from the one before it in the same word, in
+    #: semitones, and which way the prompt says it should have gone. Both are
+    #: ``None`` on a word's first vowel, which has nothing to move from.
+    #:
+    #: These carry the part of the measurement that survives on a short prompt.
+    #: A tone label is an absolute judgement and needs a register to be judged
+    #: against; pitch is normalised against the recording's own median, so a
+    #: two-vowel word is normalised against itself and there is no register.
+    #: The *movement* between two vowels needs no register at all -- it is a
+    #: difference, and both terms shift together. So on exactly the utterances
+    #: where the label is least trustworthy, the interval is still sound, and
+    #: telling a learner "your pitch fell where it should rise" is supported by
+    #: the measurement in a way that "that vowel was Low, not Mid" is not.
+    measured_step_st: float | None = None
+    expected_step: str | None = None      # "rise", "fall" or "level"
+
+    #: Whether the interval runs forward to the next vowel rather than back to
+    #: the previous one. A word's first vowel has nothing behind it, and on a
+    #: two-vowel word that is half the errors -- and both of the ones the igba
+    #: set actually produces. The interval is the same measurement either way.
+    step_to_next: bool = False
+
+    #: Whether the recording was long enough to establish where this speaker's
+    #: Low, Mid and High actually sit. Under four tone-bearing units it is not:
+    #: pitch is normalised against the recording's own median, so a short
+    #: utterance is normalised against itself.
+    #:
+    #: This does not change the score. It changes what the learner is told, and
+    #: only in the case where the engine can see that the *movement* was right
+    #: and cannot honestly say the starting level was wrong.
+    register_measurable: bool = True
+
     def describe(self) -> str:
         names = {Tone.HIGH: "High", Tone.MID: "Mid", Tone.LOW: "Low", Tone.UNKNOWN: "unclear"}
         ordinal = ["first", "second", "third", "fourth", "fifth"]
         which = ordinal[self.vowel_index] if self.vowel_index < len(ordinal) else f"{self.vowel_index + 1}th"
-        return (
+        line = (
             f"Tone mismatch on {which} vowel of '{self.word}': "
             f"expected {names[self.expected]}, detected {names[self.detected]}."
         )
+        movement = self.describe_movement()
+        if movement:
+            return f"{line} {movement}"
+        if not self.register_measurable and self.measured_step_st is not None:
+            # The pitch moved the way the prompt asks; what is in doubt is the
+            # level it moved from, and one word is not enough to establish that.
+            # Saying so is more useful than a flat assertion the measurement
+            # does not support.
+            return (
+                f"{line} The movement is right -- what could not be judged is "
+                "the level it starts from, which needs more than a single word. "
+                "Try the same word in a sentence."
+            )
+        return line
+
+    def describe_movement(self) -> str | None:
+        """What the learner's pitch did between the last vowel and this one.
+
+        Returns ``None`` when there is no previous vowel to move from, or when
+        the movement agrees with the prompt -- in which case the label is the
+        only thing wrong and saying it twice would not help.
+        """
+        if self.measured_step_st is None or self.expected_step is None:
+            return None
+
+        size = abs(self.measured_step_st)
+        if size < 1.0:
+            went = "stayed level"
+        elif self.measured_step_st > 0:
+            went = f"rose {size:.1f} semitones"
+        else:
+            went = f"fell {size:.1f} semitones"
+
+        wanted = {"rise": "rise", "fall": "fall", "level": "stay level"}[self.expected_step]
+        agrees = (
+            (self.expected_step == "rise" and self.measured_step_st >= 1.0)
+            or (self.expected_step == "fall" and self.measured_step_st <= -1.0)
+            or (self.expected_step == "level" and size < 1.0)
+        )
+        if agrees:
+            return None
+        where = ("into the next vowel" if self.step_to_next
+                 else "from the vowel before it")
+        return f"Your pitch {went} {where}, where it should {wanted}."
 
 
 @dataclass
