@@ -414,6 +414,30 @@ class ScoringConfig:
     #: This is safe here only because the app trims silence from both ends
     #: before the engine sees the recording, so coverage measures speech rather
     #: than how long the learner waited before speaking.
+    #:
+    #: **And that trimming is also its limit.** The 17% -> 3% figure this rule
+    #: was tuned on came from whole corpus utterances, where the aligner leaves
+    #: most of the file as silence. A recording the app has trimmed does not
+    #: look like that: it is speech end to end, so a learner who says something
+    #: wrong *continuously* covers the recording just as a correct one does.
+    #: Re-measured on one-second segments of other speech, trimmed the way the
+    #: app trims -- which is what a learner saying "bla bla bla" produces --
+    #: 10% still score 50% or better against `Igbá` and 8% score 80% or better.
+    #:
+    #: The survivors are short Yoruba words that genuinely resemble the prompt
+    #: in spelling and in sound: `gba`, `ìpa`, `ìjọba` against `igbá`. No
+    #: threshold separates those, because a quarter of *genuine* one-word
+    #: attempts already resemble their own prompt below 0.55 -- the recogniser
+    #: writes `chicken` for `ṣìkẹ́` and `phone wọn` for `fọhùn`.
+    #:
+    #: A one-word prompt is therefore weakly verifiable by construction, and the
+    #: fix is not another threshold. Measured on the same segments:
+    #:
+    #:     prompt `Igbá`         10% score >= 50%,  8% >= 80%
+    #:     prompt `Èyí ni Igbá`   0% score >= 50%,  0% >= 80%
+    #:
+    #: Three words give the text checks the separation they were built on. That
+    #: is what the carrier-frame phrases in the app are for.
     min_one_word_coverage: float = 0.60
 
     #: How much a recognised transcript must sound like the prompt before the
