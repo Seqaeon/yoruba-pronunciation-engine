@@ -1087,7 +1087,18 @@ class AssessmentPipeline:
         window = 320                     # 20 ms at 16 kHz
         frames = len(samples) // window
         if frames < 10:
-            return None                  # too short to characterise; not our call
+            # Under 200 ms. This used to return None and let the recording
+            # through, on the grounds that it was too short to characterise --
+            # which handed the shortest recordings a free pass through the one
+            # check meant to catch an empty one. A fifth of a second cannot
+            # hold a Yoruba word: the engine's own single-word reference clips
+            # run 380 to 600 ms.
+            logger.warning("Utterance %s is %.2fs, too short to contain the "
+                           "prompt", utt_id, len(samples) / 16000)
+            return self._no_speech_result(
+                utt_id, target_text,
+                f"The recording is only {len(samples) / 16000:.1f} seconds long, "
+                "which is too short to hold the phrase.")
 
         energy = np.sqrt(np.mean(
             samples[:frames * window].reshape(frames, window) ** 2, axis=1)) + 1e-12
@@ -1099,6 +1110,15 @@ class AssessmentPipeline:
         logger.warning("Utterance %s has %.1f dB of dynamic range, below %.1f: "
                        "treating it as no speech", utt_id, dynamic_range,
                        self.config.scoring.min_dynamic_range_db)
+        return self._no_speech_result(
+            utt_id, target_text,
+            f"The recording has {dynamic_range:.1f} dB between its loudest and "
+            "quietest moments, where speech has far more. It sounds like "
+            "nothing was said.")
+
+    def _no_speech_result(self, utt_id: str, target_text: str,
+                          note: str) -> ComparisonResult:
+        """A zero-scored result for a recording with nothing in it."""
         result = ComparisonResult(
             utterance_id=utt_id,
             reference_transcript=normalize(target_text),
@@ -1108,10 +1128,7 @@ class AssessmentPipeline:
             overall_score=0.0,
         )
         result.verified = False
-        result.verification_note = (
-            f"The recording has {dynamic_range:.1f} dB between its loudest and "
-            f"quietest moments, where speech has far more. It sounds like "
-            "nothing was said.")
+        result.verification_note = note
         self._withhold_score(result)
         result.feedback = [
             "We could not hear any speech in that recording.",
