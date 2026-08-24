@@ -357,6 +357,16 @@ class ComparisonResult:
     #: construction and is excluded from the overall score.
     text_similarity_applicable: bool = True
 
+    #: Whether the tone score describes the learner's rendition of the prompt.
+    #:
+    #: ``False`` when the recording could not be confirmed to contain the
+    #: prompt. The tone comparison still runs in that case -- the aligner will
+    #: place the prompt's vowels somewhere in whatever audio it is given -- but
+    #: what it measures is the pitch of a forced fit, not of the phrase. Two
+    #: seconds of appliance hum scored 50% and a distant conversation 67%,
+    #: numbers a learner reasonably read as partial credit for saying nothing.
+    tone_similarity_applicable: bool = True
+
     verified: bool = True
     verification_note: str | None = None
     learner_speech_coverage: float | None = None

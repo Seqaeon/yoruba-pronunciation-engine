@@ -1052,8 +1052,28 @@ class AssessmentPipeline:
 
     @staticmethod
     def _withhold_score(result: ComparisonResult) -> None:
-        """Zero the score and say what to do, without presenting a forced fit."""
+        """Zero the score and say what to do, without presenting a forced fit.
+
+        This used to zero ``overall_score`` alone and leave the components as
+        they were, which meant an unverified recording still reported a tone
+        percentage -- and the aligner will always place the prompt's vowels
+        somewhere, so there is always a percentage to report. Recording two
+        seconds of appliance hum came back as 50% tone, and a conversation in
+        another room as 67%: partial credit for saying nothing.
+
+        A forced fit is not a measurement of the learner, so none of it is
+        published. The components are zeroed *and* marked inapplicable, because
+        a bare 0% would say the learner got every tone wrong, which is a
+        different and equally false claim.
+        """
         result.overall_score = 0.0
+        result.text_similarity = 0.0
+        result.text_similarity_applicable = False
+        result.tone_similarity = 0.0
+        result.tone_similarity_applicable = False
+        result.vowel_accuracy = None
+        # Tone errors from a forced fit name vowels the learner never produced.
+        result.tone_errors = []
         result.feedback = [
             "We could not confirm you said the prompt. Listen to the reference "
             "again and repeat just that phrase.",
