@@ -445,9 +445,27 @@ class AssessmentPipeline:
                             "heard %r", utt_id, target_text, learner_text)
                 align_text = target_text
 
-        learner = self.analyse_utterance(
-            learner_audio, align_text, utterance_id=f"{utt_id}_learner"
-        )
+        try:
+            learner = self.analyse_utterance(
+                learner_audio, align_text, utterance_id=f"{utt_id}_learner"
+            )
+        except PitchExtractionError:
+            # No voiced frames anywhere in the recording. That is the same
+            # finding as the silence check above, arrived at by a better
+            # detector -- pitch tracking answers "is anyone speaking" more
+            # reliably than the energy range does, which matters because a
+            # browser's automatic gain control lifts room noise to nearly full
+            # scale: a recording of nothing measured 16.9 dB of range and peaked
+            # at -0.9 dBFS, well clear of the energy threshold.
+            #
+            # It used to escape as an exception naming a temporary file, which
+            # the app showed to the learner.
+            logger.warning("Utterance %s has no voiced frames; treating it as "
+                           "no speech", utt_id)
+            return self._no_speech_result(
+                utt_id, target_text,
+                "No voice was detected in the recording -- it sounds silent, "
+                "too noisy, or whispered.")
         if align_text != learner_text:
             learner.transcript = learner_text
 
