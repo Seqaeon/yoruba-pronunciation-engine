@@ -9,9 +9,9 @@
    "purpose": "MFA acoustic model, trained on 193,309 utterances from 2,801 speakers (~118 h: SLR86, studio corpus, YECS). Everything else is calibrated against it."
   },
   "models/vowel_classifier.joblib": {
-   "bytes": 9571749,
-   "sha256": "c85adf7ec1d78c439857e231d22521ec37f6303e47ae71056e457eadc5bc907e",
-   "purpose": "Vowel identity, 575,125 vowels from 2,786 speakers, fitted to models/finetuned_utterance. It names its encoder in its metadata and the engine loads that, so the pair cannot drift."
+   "bytes": 12050180,
+   "sha256": "3d1e419e77082b65fe0ed2dc5d239879f1de500fa0c84913a52b87ea51830183",
+   "purpose": "Vowel identity, 393,534 vowels from 903 speakers, fitted to models/finetuned_utterance over neural-aligner spans -- the spans the engine produces, rather than MFA's. Carries a syllabic-nasal class (n~) the previous model lacked. It names its encoder and its labels in the bundle and the engine reads both, so neither the pair nor the class order can drift."
   },
   "models/tone_classifier.joblib": {
    "bytes": 3273919,
