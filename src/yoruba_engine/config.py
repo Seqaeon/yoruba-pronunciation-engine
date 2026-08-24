@@ -325,6 +325,44 @@ class ScoringConfig:
 
     min_speech_coverage: float = 0.35
 
+    #: How much the loudest part of a recording must exceed the quietest, in
+    #: decibels, for it to contain speech at all.
+    #:
+    #: A learner who presses record, says nothing, and stops was being scored.
+    #: Two seconds of appliance hum came back as 94% overall and 100% tone
+    #: against the one-word prompt `Igbà`, because the recogniser hallucinated
+    #: `gbá` from the noise and `gba` shares three of the four characters of
+    #: `igba` -- 0.86 resemblance, far above the 0.55 verification bar. That bar
+    #: was set on multi-word phrases, where genuine attempts scored 0.67-0.97
+    #: and unrelated ones 0.13-0.43. At one word the separation is gone: short
+    #: strings share characters by chance, so no threshold on resemblance can
+    #: tell a real attempt from a hallucination.
+    #:
+    #: The distinguishing property is acoustic, not textual. Speech is loud in
+    #: syllables and quiet between them; steady noise is not. Measured as the
+    #: 95th minus the 5th percentile of frame energy, which is invariant to
+    #: recording gain:
+    #:
+    #:     appliance hum          0.0 dB
+    #:     white noise            1.1 dB
+    #:     breath and hum         3.8 dB
+    #:     fan with slow drift    5.3 dB
+    #:     filtered noise         5.8 dB
+    #:     real speech, median   61.3 dB  (400 corpus utterances)
+    #:     real speech, 5th pct   8.2 dB
+    #:
+    #: The distributions do touch, so this is a trade rather than a clean line.
+    #: At 6 dB every noise sample above is rejected, along with about 3% of
+    #: corpus utterances -- and those are tightly trimmed corpus files, where a
+    #: recording made in a browser always carries silence at the ends and sits
+    #: far higher. The engine's own reference clips, cut to the word with no
+    #: silence at all, still measure 9.5 to 22.3 dB.
+    #:
+    #: This is a necessary condition, not a sufficient one. It catches a silent
+    #: or steady-noise recording. It does not catch someone saying the wrong
+    #: thing, which is what the resemblance and coverage checks are for.
+    min_dynamic_range_db: float = 6.0
+
     #: How much a recognised transcript must sound like the prompt before the
     #: attempt counts as an attempt at that phrase at all.
     #:

@@ -316,6 +316,17 @@ class AssessmentPipeline:
             reference_audio.stem if reference_audio is not None
             else learner_audio.stem)
 
+        # Does this recording contain speech at all? Asked before anything else,
+        # because everything downstream assumes it does. The recogniser
+        # hallucinates a word from noise, the aligner lays the prompt's phones
+        # across it, and pitch is measured from a hum -- producing a score for a
+        # learner who said nothing. It also fails outright on long prompts: two
+        # seconds of hum against `Èyí ni Igba` raised "99 frames cannot hold 216
+        # phones", a hallucinated transcript shown to the learner as an error.
+        silent = self._reject_if_silent(learner_audio, target_text, utt_id)
+        if silent is not None:
+            return silent
+
         if reference_audio is None:
             # No native recording for this prompt. The comparison never needed
             # one: it reads the reference's words, their vowel counts and the
@@ -1049,6 +1060,65 @@ class AssessmentPipeline:
             "Utterance %s failed verification: coverage %.2f",
             result.utterance_id, coverage,
         )
+
+    def _reject_if_silent(self, learner_audio: Path, target_text: str,
+                          utt_id: str) -> ComparisonResult | None:
+        """A withheld result when the recording holds no speech, else ``None``.
+
+        Speech is loud in syllables and quiet between them; steady noise is not.
+        The measure is the 95th minus the 5th percentile of frame energy in
+        decibels, which is invariant to how loud the recording was made. See
+        :attr:`~yoruba_engine.config.ScoringConfig.min_dynamic_range_db` for the
+        measured distributions behind the threshold.
+
+        Returns a result rather than raising, so that saying nothing is scored
+        zero with an explanation like any other unverified attempt, instead of
+        reaching the app as an error.
+        """
+        import numpy as np  # noqa: PLC0415
+
+        from .audio import read_mono  # noqa: PLC0415
+
+        try:
+            samples = read_mono(learner_audio, 16000)
+        except Exception:
+            return None                  # let the normal path report the problem
+
+        window = 320                     # 20 ms at 16 kHz
+        frames = len(samples) // window
+        if frames < 10:
+            return None                  # too short to characterise; not our call
+
+        energy = np.sqrt(np.mean(
+            samples[:frames * window].reshape(frames, window) ** 2, axis=1)) + 1e-12
+        level = 20 * np.log10(energy)
+        dynamic_range = float(np.percentile(level, 95) - np.percentile(level, 5))
+        if dynamic_range >= self.config.scoring.min_dynamic_range_db:
+            return None
+
+        logger.warning("Utterance %s has %.1f dB of dynamic range, below %.1f: "
+                       "treating it as no speech", utt_id, dynamic_range,
+                       self.config.scoring.min_dynamic_range_db)
+        result = ComparisonResult(
+            utterance_id=utt_id,
+            reference_transcript=normalize(target_text),
+            learner_transcript="",
+            text_similarity=0.0,
+            tone_similarity=0.0,
+            overall_score=0.0,
+        )
+        result.verified = False
+        result.verification_note = (
+            f"The recording has {dynamic_range:.1f} dB between its loudest and "
+            f"quietest moments, where speech has far more. It sounds like "
+            "nothing was said.")
+        self._withhold_score(result)
+        result.feedback = [
+            "We could not hear any speech in that recording.",
+            "Check your microphone is working and that you are recording in a "
+            "reasonably quiet place, then say the phrase aloud.",
+        ]
+        return result
 
     @staticmethod
     def _withhold_score(result: ComparisonResult) -> None:
