@@ -275,6 +275,16 @@ class ScoringConfig:
     max_confident_vowel_error: float = 0.15
     min_confident_vowel: float = 0.70
 
+    #: Below this many words in the prompt, the recogniser is not consulted.
+    #:
+    #: It exists to name a word the learner substituted, which needs enough
+    #: audio to constrain the decoder. One word does not constrain it: a
+    #: one-second recording of `ìgbà` came back as `bí ìgbà tẹ bá`, and the
+    #: aligner then spread four words' vowel spans across one word of audio.
+    #: Tone on the igba minimal set went 3/5 to 2/5 for nothing, since the
+    #: prompt already named the word.
+    min_words_to_recognise: int = 3
+
     min_speech_coverage: float = 0.35
 
     #: How much a recognised transcript must sound like the prompt before the

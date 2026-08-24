@@ -86,6 +86,17 @@ def _default_aligner(config):
     return MFAAligner(config)
 
 
+def _tone_only_difference(prompted: str, decoded: str) -> bool:
+    """Whether two spellings differ in nothing but tone marks.
+
+    Sub-dots are kept: ``ọ`` and ``o`` are different vowels, and the decoder can
+    hear that. Tone marks are not, and it cannot.
+    """
+    from .g2p.orthography import normalize, strip_tones  # noqa: PLC0415
+
+    return strip_tones(normalize(prompted)) == strip_tones(normalize(decoded))
+
+
 class AssessmentPipeline:
     """Orchestrates Stages 3 through 7 for a single assessment request."""
 
@@ -319,7 +330,20 @@ class AssessmentPipeline:
                 reference_audio, target_text, utterance_id=f"{utt_id}_ref"
             )
 
-        if learner_text is None:
+        # A recogniser earns its place by naming a word the learner substituted.
+        # On a one- or two-word prompt it cannot: there is too little audio to
+        # constrain the decoder, and it invents. Measured on the igba minimal set,
+        # a one-second recording of `ìgbà` came back as `bí ìgbà tẹ bá` -- four
+        # words -- and the aligner then placed vowel spans for four words across
+        # audio containing one, so the pitch measured for each vowel belonged to
+        # the wrong segment. Tone accuracy on that set went from 3/5 to 2/5 for
+        # no gain: the prompt already said which word it was.
+        recognise = (self.transcript_provider.recognizes_speech
+                     and len(normalize(target_text).split())
+                     >= self.config.scoring.min_words_to_recognise)
+        if learner_text is None and not recognise:
+            learner_text = target_text
+        elif learner_text is None:
             learner_text = self.transcript_provider.transcribe(learner_audio, prompt=target_text)
             if self.transcript_provider.recognizes_speech:
                 # Yoruba is written with spaces the speech does not have, so a
@@ -349,7 +373,7 @@ class AssessmentPipeline:
         # provider ran -- the branch had never been exercised, because until
         # Whisper arrived every provider echoed the prompt back.
         poorly = self._check_pronunciation(learner)
-        if not self.transcript_provider.recognizes_speech:
+        if not recognise:
             # Decode before dropping anything: a word the learner replaced is
             # still fully present in the audio, and calling it missing when we
             # can name what was said instead is the wrong feedback.
@@ -399,7 +423,7 @@ class AssessmentPipeline:
         vowel_accuracy, vowel_errors = self._score_vowel_identity(learner, target_text)
         result = self.comparison_engine.compare(
             reference, learner,
-            tolerate_spelling=self.transcript_provider.recognizes_speech,
+            tolerate_spelling=recognise,
             vowel_accuracy=vowel_accuracy)
         # Words carrying a confident vowel error join the ones the per-word check
         # flagged, so the report marks them CHECK VOWELS as well as scoring them.
@@ -601,6 +625,21 @@ class AssessmentPipeline:
             if not distributions:
                 continue
             verdict = self.word_decoder.decode(normalize(word.word), distributions)
+            # The decoder reads vowel identity, so it cannot hear tone -- and a
+            # word differing from the prompt only in tone marks has, by
+            # definition, the same vowels. Naming one is not a measurement, it is
+            # the decoder picking between candidates it cannot distinguish.
+            #
+            # `ìgbá` (garden egg) and `ìgbà` (time) differ in one accent. The
+            # decoder reported SAID DIFFERENTLY on a correct reading of `ìgbá`,
+            # which is precisely backwards in an exercise built to teach that
+            # tone carries the meaning. A tonal error belongs to the tone
+            # report, which reads pitch and can actually see it.
+            if verdict.substituted and _tone_only_difference(word.word, verdict.decoded):
+                logger.info("%s: not naming %r for %r; they differ only in tone, "
+                            "which the vowel decoder cannot read",
+                            learner.utterance_id, verdict.decoded, word.word)
+                continue
             if verdict.substituted:
                 substitutions[word.word] = verdict.decoded
                 logger.info("%s: %r decoded as %r (margin %+.2f)",
