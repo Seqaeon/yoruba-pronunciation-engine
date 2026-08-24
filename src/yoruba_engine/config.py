@@ -277,13 +277,14 @@ class ScoringConfig:
 
     #: Below this many words in the prompt, the recogniser is not consulted.
     #:
-    #: It exists to name a word the learner substituted, which needs enough
-    #: audio to constrain the decoder. One word does not constrain it: a
-    #: one-second recording of `ìgbà` came back as `bí ìgbà tẹ bá`, and the
-    #: aligner then spread four words' vowel spans across one word of audio.
-    #: Tone on the igba minimal set went 3/5 to 2/5 for nothing, since the
-    #: prompt already named the word.
-    min_words_to_recognise: int = 3
+    #: Default 1, which never skips. It was briefly set to 3 on a mistaken
+    #: diagnosis: a one-second clip of `ìgbà` transcribed as `bí ìgbà tẹ bá`
+    #: and was read as the decoder inventing words. It was not -- the clip had
+    #: been cut with neighbouring words still in it, and the recogniser was
+    #: right. Transcription is the only thing that can say what a learner
+    #: actually said, and a short prompt is where a substitution is most likely
+    #: to be the whole answer, so it is the last thing to switch off.
+    min_words_to_recognise: int = 1
 
     min_speech_coverage: float = 0.35
 

@@ -283,6 +283,35 @@ class ComparisonEngine:
                                 tolerate_spelling=tolerate_spelling)
         text_similarity = max(0.0, 1.0 - alignment.error_rate)
 
+        # On a one-word prompt the word-level score has only two values, and a
+        # recogniser out of its depth on half a second of audio swings it the
+        # whole way. Two of the igba reference clips -- recordings a native
+        # speaker confirms contain exactly the right word -- came back as `ti
+        # gbà` and `tí gbà`, an inserted consonant and a split, and scored zero
+        # text where an unmistakably wrong word would also score zero.
+        #
+        # Characters carry the distinction words cannot at this length: those
+        # two resemble the prompt at 0.89, while the five igba words resemble
+        # each other at most 0.80 once tones are stripped. So a single-word
+        # prompt is scored on how much of it was heard rather than on whether
+        # the recogniser spelled it exactly, which is the same question
+        # phrase_resemblance already answers for verification.
+        #
+        # Longer prompts keep the word-level score. There the recogniser has
+        # enough context to be trusted, and naming which word was wrong is the
+        # feedback a learner needs.
+        # Measured against the transcript, not against the aligned words. When a
+        # one-word attempt is aligned to the prompt rather than to a mis-spelled
+        # recognition, those two differ, and scoring the aligned words would
+        # compare the prompt with itself and return 1.0 for anything that got
+        # that far -- including a genuine substitution such as `dàbò` for
+        # `dàbọ̀`, which is exactly the error this project most needs to keep
+        # reporting. The transcript is what the recogniser actually heard.
+        if len(reference_tokens) == 1:
+            heard = learner.transcript or " ".join(learner_tokens)
+            if heard:
+                text_similarity = phrase_resemblance(reference_tokens[0], heard)
+
         tone_comparison = self.tone_analyzer.compare(
             reference_words, learner_words, word_pairs=alignment.pairs
         )

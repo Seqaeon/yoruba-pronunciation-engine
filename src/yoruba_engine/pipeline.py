@@ -330,14 +330,18 @@ class AssessmentPipeline:
                 reference_audio, target_text, utterance_id=f"{utt_id}_ref"
             )
 
-        # A recogniser earns its place by naming a word the learner substituted.
-        # On a one- or two-word prompt it cannot: there is too little audio to
-        # constrain the decoder, and it invents. Measured on the igba minimal set,
-        # a one-second recording of `ìgbà` came back as `bí ìgbà tẹ bá` -- four
-        # words -- and the aligner then placed vowel spans for four words across
-        # audio containing one, so the pitch measured for each vowel belonged to
-        # the wrong segment. Tone accuracy on that set went from 3/5 to 2/5 for
-        # no gain: the prompt already said which word it was.
+        # A recogniser earns its place by naming the word a learner actually
+        # said, which is the only way the engine can report a substitution. That
+        # is worth most on a one-word drill -- the whole point of the igba set is
+        # that five different words are spelled almost alike -- so recognition
+        # stays on however short the prompt is.
+        #
+        # It was briefly gated off below three words, on the evidence that a
+        # one-second `ìgbà` came back as `bí ìgbà tẹ bá`. That evidence was
+        # wrong: the recording genuinely contained all four words, because the
+        # clip had been cut badly. The decoder was right and the gate was
+        # removed. What a short clip does cause is the milder failure handled
+        # just below.
         recognise = (self.transcript_provider.recognizes_speech
                      and len(normalize(target_text).split())
                      >= self.config.scoring.min_words_to_recognise)
@@ -360,9 +364,81 @@ class AssessmentPipeline:
                                 learner_text, respaced)
                     learner_text = respaced
 
+                # Half a second of audio does not constrain a decoder trained on
+                # thirty-second windows, and it fills the silence with common
+                # function words: the igba reference clips came back as `tí gbà`
+                # and `mo ní ìgbà` for recordings a native speaker confirms
+                # contain one word. Scored literally, those extra tokens are
+                # insertions, and a correct attempt lands at zero.
+                #
+                # On a one-word prompt the fix is available without weakening
+                # anything: exactly one of the heard tokens is the attempt at
+                # that word, so keep the closest one and drop the padding. The
+                # substitution check survives, because the token kept is
+                # whatever was actually said -- `ìgbá` for `ìgbà` is still a
+                # different word and still reported. Only the decoder's filler
+                # is discarded, and only when the prompt cannot contain filler.
+                heard_words = normalize(learner_text).split()
+                if len(normalize(target_text).split()) == 1 and len(heard_words) > 1:
+                    from .compare.engine import phrase_resemblance  # noqa: PLC0415
+
+                    # Two different failures look alike here and must not be
+                    # treated alike. `ìgbà` heard as `ti gbà` is one word split
+                    # in two, and both halves are the learner's audio. `ìgbà`
+                    # heard as `mo ní ìgbà` is one word plus decoder filler, and
+                    # only the last token is the learner's audio.
+                    #
+                    # Resemblance separates them cleanly, because a split still
+                    # resembles the prompt as a whole while filler does not:
+                    #
+                    #     ti gbà      whole 0.89   best token 0.86   -> keep both
+                    #     mo ní ìgbà  whole 0.67   best token 1.00   -> keep one
+                    #
+                    # Keeping the whole of a split also keeps its vowel count,
+                    # which the tone check needs: dropping `ti` leaves one vowel
+                    # against a two-vowel prompt and the tone score collapses.
+                    closest = max(heard_words,
+                                  key=lambda w: phrase_resemblance(target_text, w))
+                    if phrase_resemblance(target_text, closest) > phrase_resemblance(
+                            target_text, learner_text):
+                        logger.info("Kept %r from %r for the one-word prompt %r",
+                                    closest, learner_text, target_text)
+                        learner_text = closest
+
+        # What gets aligned is not always what gets reported. Alignment needs the
+        # phone sequence the audio actually contains; the transcript is what the
+        # learner is told they were heard to say.
+        #
+        # They come apart on a one-word prompt the recogniser mis-spells. `ìgbà`
+        # heard as `ti gbà` is two words to the aligner, so it lays two words of
+        # phones across one word of audio, every vowel span lands in the wrong
+        # place, and tone accuracy goes to zero on a recording that is correct.
+        # When the recognition resembles the prompt closely enough to be an
+        # attempt at it, the prompt is the better phone sequence -- it is what a
+        # native speaker confirms is there -- so align against that.
+        #
+        # Nothing is hidden by this. The heard text still sets the text score and
+        # still names a substitution; tone comes from pitch and vowel identity
+        # from the classifier, neither of which reads the spelling. And a learner
+        # who said a different word does not reach here: their recognition would
+        # not resemble the prompt.
+        align_text = learner_text
+        if (recognise and learner_text
+                and len(normalize(target_text).split()) == 1
+                and normalize(learner_text) != normalize(target_text)):
+            from .compare.engine import phrase_resemblance  # noqa: PLC0415
+
+            if (phrase_resemblance(target_text, learner_text)
+                    >= self.config.scoring.min_phrase_resemblance):
+                logger.info("Aligning %s against the prompt %r rather than the "
+                            "heard %r", utt_id, target_text, learner_text)
+                align_text = target_text
+
         learner = self.analyse_utterance(
-            learner_audio, learner_text, utterance_id=f"{utt_id}_learner"
+            learner_audio, align_text, utterance_id=f"{utt_id}_learner"
         )
+        if align_text != learner_text:
+            learner.transcript = learner_text
 
         dropped: list[str] = []
         mispronounced: list[str] = []
