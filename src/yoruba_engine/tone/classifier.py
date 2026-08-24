@@ -152,6 +152,10 @@ class ToneClassifier:
             # threshold heuristic, and better suited to suppressing shaky
             # feedback via ToneConfig.min_confidence.
             vowel.confidence = float(distribution[best])
+            vowel.tone_probabilities = {
+                tone: float(distribution[index])
+                for index, tone in enumerate(TONE_ORDER)
+            }
 
     def feature_importances(self) -> list[tuple[str, float]]:
         """Feature names paired with their importances, most important first.

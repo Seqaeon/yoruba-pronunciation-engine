@@ -93,6 +93,33 @@ class ToneConfig:
     #: Below this confidence the tone is reported but flagged as uncertain.
     min_confidence: float = 0.35
 
+    #: How credible the prompt's tone has to be, in the classifier's own
+    #: distribution, for the learner to be given it.
+    #:
+    #: Marking on the top choice alone is far stricter than the model's
+    #: certainty warrants. Every corpus utterance is a native speaker reading
+    #: correctly, so every tone error the engine reports on corpus audio is a
+    #: false alarm -- and on 306,449 held-out units the old rule reported one on
+    #: 15.3% of vowels. One vowel in six and a half was told it was wrong when
+    #: it was right, and 22.2% on two-vowel utterances.
+    #:
+    #: Crediting the prompt's tone whenever the model gives it at least this
+    #: much probability, measured on the same units:
+    #:
+    #:     threshold   false alarms   real errors caught
+    #:     top choice        15.3%          92.3%          (the old rule)
+    #:     0.40              13.2%          91.0%
+    #:     0.30              10.3%          88.3%
+    #:     0.25               8.8%          86.4%
+    #:     0.20               7.3%          83.9%
+    #:     0.10               4.2%          75.4%
+    #:
+    #: Real errors are measured by asking for a tone the speaker did not
+    #: produce and checking the engine objects. 0.25 cuts false alarms by 43%
+    #: for six points of detection, which is the right trade for a learner:
+    #: being wrongly corrected teaches nothing and is why tone felt arbitrary.
+    min_tone_credibility: float = 0.25
+
 
 @dataclass
 class SegmentalConfig:

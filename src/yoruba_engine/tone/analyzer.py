@@ -324,8 +324,32 @@ class ToneAnalyzer:
                     continue
 
                 total += 1
-                if expected == learner_vowel.detected_tone:
+
+                # Credit the prompt's tone when the classifier finds it a
+                # credible reading, not only when it is the top one. The top
+                # choice is a far stricter test than the model's own certainty
+                # supports: on 306,449 held-out units of native speech -- all of
+                # it correct by construction -- marking on the top choice
+                # reported an error on 15.3% of vowels, and 22.2% of vowels in
+                # two-vowel utterances.
+                #
+                # Low and Mid are the pair this matters for. They are adjacent
+                # levels distinguished by a register a short recording cannot
+                # establish, so the model routinely splits close to evenly
+                # between them, and whichever side lands fractionally higher was
+                # being reported to the learner as fact.
+                #
+                # See ToneConfig.min_tone_credibility for the measured trade.
+                probabilities = learner_vowel.tone_probabilities or {}
+                credible = probabilities.get(expected, 0.0) >= self.config.min_tone_credibility
+
+                if expected == learner_vowel.detected_tone or credible:
                     matched += 1
+                    if expected != learner_vowel.detected_tone:
+                        logger.debug(
+                            "Crediting %r vowel %d as %s: the model gives it %.2f",
+                            ref_word.word, vowel_index, expected.name,
+                            probabilities.get(expected, 0.0))
                 elif learner_vowel.confidence >= self.config.min_confidence:
                     # Record the movement into this vowel as well as the label.
                     # On a short prompt the label is the shakier of the two --

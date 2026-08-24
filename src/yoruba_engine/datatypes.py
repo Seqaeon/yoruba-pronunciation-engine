@@ -144,6 +144,15 @@ class VowelSegment:
     #: debugging and for tuning runs.
     tone_score: float | None = None
 
+    #: The classifier's probability for each tone, not only the one it chose.
+    #:
+    #: ``confidence`` records how sure it was of its top choice, which cannot
+    #: answer the question that matters when marking: is the tone the prompt
+    #: asks for a *credible* reading of this vowel? A vowel the model calls Low
+    #: at 0.40 with Mid at 0.38 is not evidence that the learner said Low.
+    #: Marking it wrong on that basis is what made tone feel arbitrary.
+    tone_probabilities: dict[Tone, float] | None = None
+
     @property
     def excursion_st(self) -> float | None:
         """Rise (positive) or fall (negative) across the vowel, in semitones."""

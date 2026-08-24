@@ -171,3 +171,7 @@ class ToneSequenceClassifier:
             best = int(distribution.argmax())
             vowel.detected_tone = TONE_ORDER[best]
             vowel.confidence = float(distribution[best])
+            vowel.tone_probabilities = {
+                tone: float(distribution[index])
+                for index, tone in enumerate(TONE_ORDER)
+            }
