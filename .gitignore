@@ -124,3 +124,8 @@ notebooks/
 models/*_slices/
 models/span_test/
 models/*.mfa_spans.joblib
+
+# Source media. The clips cut from it live in data/, which is ignored; the video
+# itself is not something a clone needs.
+*.mp4
+*.mkv
