@@ -96,29 +96,39 @@ class ToneConfig:
     #: How credible the prompt's tone has to be, in the classifier's own
     #: distribution, for the learner to be given it.
     #:
-    #: Marking on the top choice alone is far stricter than the model's
+    #: Marking on the classifier's top choice alone is far stricter than its
     #: certainty warrants. Every corpus utterance is a native speaker reading
     #: correctly, so every tone error the engine reports on corpus audio is a
-    #: false alarm -- and on 306,449 held-out units the old rule reported one on
+    #: false alarm -- and on 306,449 held-out units that rule reported one on
     #: 15.3% of vowels. One vowel in six and a half was told it was wrong when
-    #: it was right, and 22.2% on two-vowel utterances.
+    #: it was right, and 22.2% of vowels in two-vowel utterances.
     #:
-    #: Crediting the prompt's tone whenever the model gives it at least this
-    #: much probability, measured on the same units:
+    #: **The two thresholds are not the same because the two mistakes are not.**
+    #: High said as Low changes the word; the igba set exists to demonstrate
+    #: exactly that. High said as Mid is a near-miss, and it is also where the
+    #: classifier is least sure, because adjacent levels are separated by a
+    #: register a short recording cannot establish. Holding both to one bar
+    #: means either nagging about near-misses or letting real errors through.
     #:
-    #:     threshold   false alarms   real errors caught
-    #:     top choice        15.3%          92.3%          (the old rule)
-    #:     0.40              13.2%          91.0%
-    #:     0.30              10.3%          88.3%
-    #:     0.25               8.8%          86.4%
-    #:     0.20               7.3%          83.9%
-    #:     0.10               4.2%          75.4%
+    #: Measured on the same held-out units, with detection tested by asking for
+    #: a tone the speaker did not produce and checking the engine objects:
     #:
-    #: Real errors are measured by asking for a tone the speaker did not
-    #: produce and checking the engine objects. 0.25 cuts false alarms by 43%
-    #: for six points of detection, which is the right trade for a learner:
-    #: being wrongly corrected teaches nothing and is why tone felt arbitrary.
-    min_tone_credibility: float = 0.25
+    #:     rule                       false alarms   H<->L caught   adjacent
+    #:     top choice                       15.3%            96%         91%
+    #:     single 0.25                       8.8%            92%         84%
+    #:     single 0.15                       5.8%            89%         77%
+    #:     gross 0.35 / adjacent 0.10        5.6%            92%         72%
+    #:
+    #: The split rule holds High-versus-Low detection exactly where a single
+    #: 0.25 bar put it while cutting false alarms by a further 36%, and it beats
+    #: a single 0.15 bar on both counts at once. What it gives up is near-miss
+    #: detection, which is the right thing to give up: a learner does not need
+    #: to be native, and being wrongly corrected teaches nothing.
+    min_tone_credibility: float = 0.35
+
+    #: The same, for a confusion between neighbouring levels -- High with Mid,
+    #: or Mid with Low. Deliberately far looser. See above.
+    min_tone_credibility_adjacent: float = 0.10
 
 
 @dataclass

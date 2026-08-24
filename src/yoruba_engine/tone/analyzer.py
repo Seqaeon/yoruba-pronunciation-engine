@@ -341,7 +341,17 @@ class ToneAnalyzer:
                 #
                 # See ToneConfig.min_tone_credibility for the measured trade.
                 probabilities = learner_vowel.tone_probabilities or {}
-                credible = probabilities.get(expected, 0.0) >= self.config.min_tone_credibility
+                # How far apart the two readings are on the tone scale decides
+                # which bar applies. High against Low is two steps and changes
+                # the word; anything adjacent is a near-miss and is judged far
+                # more leniently.
+                scale = {Tone.LOW: 0, Tone.MID: 1, Tone.HIGH: 2}
+                detected = learner_vowel.detected_tone
+                gap = (abs(scale[expected] - scale[detected])
+                       if detected in scale and expected in scale else 2)
+                bar = (self.config.min_tone_credibility if gap >= 2
+                       else self.config.min_tone_credibility_adjacent)
+                credible = probabilities.get(expected, 0.0) >= bar
 
                 if expected == learner_vowel.detected_tone or credible:
                     matched += 1
