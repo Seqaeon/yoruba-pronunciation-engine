@@ -326,6 +326,13 @@ class MMSTranscriptProvider:
         return True
 
 
+#: Below this, a recording is too short for the decoder to read reliably and
+#: gets padded with silence. Measured, not chosen: see WhisperTranscriptProvider.transcribe.
+MIN_CONTEXT_S = 1.5
+
+#: How much silence goes on each side of a clip that is too short.
+PAD_S = 2
+
 class WhisperTranscriptProvider:
     """Transcribes with a Whisper checkpoint, giving open-vocabulary text.
 
@@ -447,6 +454,8 @@ class WhisperTranscriptProvider:
 
         Set ``use_prompt_context=False`` to decode without it.
         """
+        import numpy as np  # noqa: PLC0415
+
         model = self._load()
         torch = self._torch
         try:
@@ -461,6 +470,30 @@ class WhisperTranscriptProvider:
             samples = samples.mean(axis=1)
         if rate != 16000:
             samples = resample(samples, rate, 16000)
+
+        # A word on its own is far shorter than anything this decoder saw in
+        # training, and what it does with the space is invent. The same 0.38 s
+        # recording of `ìgbà` decodes differently depending only on how much
+        # silence surrounds it:
+        #
+        #     as recorded         'ti gbà'
+        #     +1.0 s each side    'gbá'
+        #     +2.0 s each side    'ìgba'
+        #
+        # There is no `ti` in that audio at any length. The reading changes
+        # because the clip is out of distribution, not because the evidence
+        # changed, and a learner practising a single word was being shown a word
+        # they had not said.
+        #
+        # Two seconds of silence either side settles it: all five words of the
+        # igba minimal set then decode as themselves. Three seconds does not --
+        # one comes back as `gbogbo igba` -- so this is a window, not a
+        # more-is-better knob, and the padding stops once the clip is long
+        # enough to need none.
+        floor = int(MIN_CONTEXT_S * 16000)
+        if len(samples) < floor:
+            silence = np.zeros(PAD_S * 16000, dtype=samples.dtype)
+            samples = np.concatenate([silence, samples, silence])
 
         features = self._processor(samples, sampling_rate=16000,
                                    return_tensors="pt").input_features
