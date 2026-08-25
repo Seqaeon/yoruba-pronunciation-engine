@@ -468,6 +468,35 @@ class AssessmentPipeline:
             learner = self.analyse_utterance(
                 learner_audio, align_text, utterance_id=f"{utt_id}_learner"
             )
+        except AlignmentError:
+            # The text does not fit in the audio. On a quiet or very short
+            # recording the recogniser invents at length -- one second of a
+            # learner's audio came back as 118 phones, and the aligner refused
+            # with "56 frames cannot hold 118 phones", which the app showed to
+            # the learner.
+            #
+            # The prompt is short and is what they were asked to say, so try
+            # that. If even the prompt will not fit, the recording is genuinely
+            # too short to hold the phrase and is reported as such rather than
+            # as an internal error.
+            if align_text is not target_text:
+                logger.info("%s: the heard text does not fit the recording; "
+                            "aligning against the prompt instead", utt_id)
+                try:
+                    learner = self.analyse_utterance(
+                        learner_audio, target_text,
+                        utterance_id=f"{utt_id}_learner")
+                    align_text = target_text
+                except (AlignmentError, PitchExtractionError):
+                    return self._no_speech_result(
+                        utt_id, target_text,
+                        "The recording is too short to hold this phrase. "
+                        "Record again and say the whole phrase.")
+            else:
+                return self._no_speech_result(
+                    utt_id, target_text,
+                    "The recording is too short to hold this phrase. "
+                    "Record again and say the whole phrase.")
         except PitchExtractionError:
             # No voiced frames anywhere in the recording. That is the same
             # finding as the silence check above, arrived at by a better
