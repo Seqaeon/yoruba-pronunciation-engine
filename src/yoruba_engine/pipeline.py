@@ -24,7 +24,7 @@ from .asr.providers import PromptedTranscriptProvider, TranscriptProvider
 from .compare.engine import ComparisonEngine
 from .g2p.orthography import normalize
 from .config import DEFAULT_CONFIG, EngineConfig
-from .exceptions import AlignmentError, PitchExtractionError
+from .exceptions import AlignmentError, G2PError, PitchExtractionError
 from .logging_utils import get_logger
 from .pitch.extractor import PitchExtractor
 from .report.reporter import ReportGenerator
@@ -443,6 +443,25 @@ class AssessmentPipeline:
                     >= self.config.scoring.min_phrase_resemblance):
                 logger.info("Aligning %s against the prompt %r rather than the "
                             "heard %r", utt_id, target_text, learner_text)
+                align_text = target_text
+
+        # A recogniser can return any string, including letters Yoruba does not
+        # use, and the G2P has nothing to map them to: a learner's recording came
+        # back as `mozade` and the assessment died on "Unmappable character 'z'".
+        # That is not the learner's error and not a fault in the prompt, so it
+        # must not end the assessment.
+        #
+        # The prompt is always mappable -- it comes from the phrase table -- so
+        # falling back to it keeps the recording scorable. The heard text is
+        # still reported, because what the recogniser thought it heard is worth
+        # showing even when it cannot be pronounced.
+        if align_text is not target_text:
+            try:
+                self._phonemise(align_text)
+            except G2PError as unmappable:
+                logger.info("Cannot phonemise the heard text %r (%s); aligning "
+                            "%s against the prompt instead",
+                            align_text, unmappable, utt_id)
                 align_text = target_text
 
         try:
@@ -1238,6 +1257,16 @@ class AssessmentPipeline:
             f"The recording has {dynamic_range:.1f} dB between its loudest and "
             "quietest moments, where speech has far more. It sounds like "
             "nothing was said.")
+
+    @staticmethod
+    def _phonemise(text: str) -> None:
+        """Raise :class:`G2PError` if any word of ``text`` has no pronunciation."""
+        from .g2p.dictionary import grapheme_to_phonemes  # noqa: PLC0415
+        from .g2p.orthography import is_noise_token, tokenize  # noqa: PLC0415
+
+        for token in tokenize(normalize(text), keep_noise=False):
+            if not is_noise_token(token):
+                grapheme_to_phonemes(token)
 
     def _no_speech_result(self, utt_id: str, target_text: str,
                           note: str) -> ComparisonResult:
