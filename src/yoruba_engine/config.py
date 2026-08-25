@@ -383,14 +383,35 @@ class ScoringConfig:
     #:     igba reference clips               median  0.23
     #:     corpus against the wrong prompt    median -1.94, 95th pct -0.39
     #:
-    #: Rejecting below -1.25 turns away 72% of wrong-prompt recordings for 5% of
-    #: genuine ones, and none of the five one-word reference clips. Unlike the
-    #: resemblance check this needs no recogniser and does not care how long the
-    #: prompt is, so it also covers the prompted mode.
+    #: Unlike the resemblance check this needs no recogniser and does not care
+    #: how long the prompt is, so it also covers the prompted mode.
+    #:
+    #: **The bar was first set at -1.25 and that was too strict.** Chosen on a
+    #: sweep against wrong-prompt recordings, it was never measured against the
+    #: refusals it caused, and a later regression found the new verification
+    #: gates together turning away about one genuine attempt in ten. Isolating
+    #: this one -- 20 multi-word and 20 one-word genuine utterances, trimmed the
+    #: way the app trims, against 25 one-second segments of other speech:
+    #:
+    #:     bar      genuine refused by GOP   wrong speech scoring >= 50%
+    #:     -0.75          7 of 20                       0%
+    #:     -1.00          3 of 20                       4%
+    #:     -1.25          2 of 20                       4%
+    #:     -1.75          1 of 20                       4%
+    #:     -2.00          1 of 20                       8%
+    #:     -2.50          0 of 20                       8%
+    #:
+    #: -1.75 refuses half as many genuine attempts as -1.25 for exactly the same
+    #: number of wrong ones, so it is strictly the better bar. -2.00 doubles the
+    #: wrong ones without recovering another genuine attempt.
+    #:
+    #: None of the sweep refused a genuine *one-word* attempt at any bar; the
+    #: one-word losses in that regression come from the coverage rule and the
+    #: resemblance check, not from here.
     #:
     #: It is a fit test, not a tone test: a learner who says the right word with
     #: the wrong tone still fits the phones, and is scored on tone as before.
-    min_mean_gop_z: float = -1.25
+    min_mean_gop_z: float = -1.75
 
     #: How much of the recording a *one-word* prompt has to occupy.
     #:
