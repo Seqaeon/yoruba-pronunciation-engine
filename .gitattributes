@@ -1,0 +1,5 @@
+# Prevent CRLF conversion on files whose byte-level identity matters.
+# The dictionary's SHA256 is checked by fetch_models.py against the manifest;
+# a line-ending change breaks that check on Windows.
+data/dictionary/*.dict text eol=lf
+models/*.json text eol=lf

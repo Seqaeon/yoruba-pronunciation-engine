@@ -145,7 +145,7 @@ def main() -> int:
             fetched = download_with_gh(args.repo, asset_tag, path, asset=asset)
             if not fetched:
                 url = (args.base_url or DEFAULT_BASE.format(
-                    repo=args.repo, tag=asset_tag)) + "/" + asset
+                    repo=args.repo, tag=asset_tag)) + asset
                 try:
                     download(url, path)
                     fetched = True
@@ -178,7 +178,7 @@ def main() -> int:
         if not download_with_gh(args.repo, asset_tag, archive, asset=spec["asset"]):
             try:
                 download((args.base_url or DEFAULT_BASE.format(
-                    repo=args.repo, tag=asset_tag)) + "/" + spec["asset"], archive)
+                    repo=args.repo, tag=asset_tag)) + spec["asset"], archive)
             except (urllib.error.URLError, urllib.error.HTTPError) as exc:
                 print(f"  ! {exc}")
                 continue
