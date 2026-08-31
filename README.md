@@ -576,7 +576,9 @@ YORUBA_CHECK_RELEASE=1 python -m pytest tests/test_install.py
 ```
 
 It compares the release assets against `models/MANIFEST.json`, and is the only
-check that can catch a manifest updated without the matching upload.
+check that can catch a manifest updated without the matching upload. CI runs it
+on every push and once a day, because a release and a manifest can drift apart
+with no commit between them.
 
 ## Project layout
 

@@ -57,6 +57,13 @@ ABSOLUTE_PATH = re.compile(
 #: these have to be in the repository, because nothing downloads them.
 CHECKPOINT_SIDECAR = "config.json"
 
+#: This file is exempt from its own rule, because it quotes the strings it
+#: exists to reject. The exemption is only safe because those strings are also
+#: the fixtures of TestTheGuardItself, which fails if the pattern stops matching
+#: them -- so the one file the scan cannot cover is the one asserting the scan
+#: still works. Nothing else may be added here.
+SELF = "tests/test_install.py"
+
 
 def git(*args: str) -> str:
     """Run git in the repository and return its stdout."""
@@ -111,6 +118,8 @@ class TestNoMachineSpecificPaths:
     def test_no_absolute_paths_in_committed_scripts(self):
         offenders = {}
         for relative in tracked():
+            if relative == SELF:
+                continue
             if not (relative.startswith(("scripts/", "src/", "tests/"))
                     or relative.endswith(".md")):
                 continue
@@ -180,7 +189,10 @@ class TestRecordedMetadata:
     """What the trained artifacts say about themselves has to stay true."""
 
     def test_frame_aligner_records_a_relative_encoder(self):
-        torch = pytest.importorskip("torch")
+        try:
+            import torch
+        except ImportError:
+            pytest.skip("torch is not installed")
 
         checkpoint = torch.load(
             io.BytesIO(committed_bytes("models/frame_aligner.pt")),

@@ -1,0 +1,79 @@
+name: tests
+
+# The release check is the reason this file exists. Everything in tests/ except
+# that one test is offline and deterministic, and would be caught by anyone
+# running pytest before pushing. The release check cannot be: it compares
+# models/MANIFEST.json against the assets actually attached to a GitHub release,
+# and those can drift apart with no commit at all -- a manifest updated without
+# the matching upload, an asset replaced by hand, a release retagged. That is
+# how v0.6.0 shipped a vowel classifier of the wrong build and stayed broken
+# until somebody attempted a clean install.
+#
+# So it also runs on a schedule, not only on push. Nothing about a quiet
+# repository makes a release correct.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # 06:17 UTC. Off the hour because everything is scheduled on the hour and
+    # GitHub delays scheduled runs under load.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: suite (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # tests/test_install.py measures its own guard against the checkpoint
+          # that shipped an absolute path, which needs that blob. It skips on a
+          # shallow clone rather than failing, so without this the test would
+          # quietly stop testing anything. The pack is under a megabyte.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # torch and transformers are deliberately absent. They are an optional
+      # extra worth ~900 MB in this job, and the one test that needs torch
+      # skips without it -- so this also checks the suite still holds for an
+      # install that took the engine without the speech extra.
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Run the suite
+        run: python -m pytest
+
+  release-assets:
+    name: release matches the manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # This job asks GitHub what is attached to a release; it does not import
+      # the engine. pytest alone is enough, and skipping the dependency install
+      # keeps a network check from failing over an unrelated wheel.
+      - name: Install
+        run: pip install pytest
+
+      - name: Compare release assets against models/MANIFEST.json
+        env:
+          YORUBA_CHECK_RELEASE: "1"
+          # gh is preinstalled on the runner; the default token can read this
+          # repository's own releases, which is all the check needs.
+          GH_TOKEN: ${{ github.token }}
+        run: python -m pytest tests/test_install.py -k Release -v
