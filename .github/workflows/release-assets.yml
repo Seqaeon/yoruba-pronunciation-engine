@@ -1,0 +1,67 @@
+name: release assets
+
+# One check, and it is the only one in this repository that cannot be replaced
+# by running pytest before pushing. It compares models/MANIFEST.json against
+# the assets actually attached to the GitHub release, and those two drift apart
+# with no commit between them: a manifest edited without the upload, an asset
+# replaced by hand, a release retagged. v0.6.0 shipped a vowel classifier of the
+# wrong build exactly that way and stayed broken until somebody attempted a
+# clean install. No commit was ever wrong, so nothing local could have caught
+# it.
+#
+# The rest of the suite is offline and deterministic. Running it here would only
+# catch someone forgetting to run pytest, and would cost Actions minutes every
+# push to do it, so it is deliberately not here.
+#
+# Measured: about 15 s of runner time, billed as one minute per run. Weekly plus
+# the occasional manifest change is under ten minutes a month.
+
+on:
+  # Weekly, not daily. A stale release is then found within seven days instead
+  # of one, which is the difference between roughly 5 and roughly 60 billed
+  # minutes a month for the same class of bug.
+  schedule:
+    - cron: "17 6 * * 1"
+
+  # And straight away when the manifest changes, since that is the moment the
+  # two can actually be made to disagree. The workflow itself is listed so a
+  # change to this file is exercised by the push that makes it.
+  push:
+    branches: [master]
+    paths:
+      - models/MANIFEST.json
+      - .github/workflows/release-assets.yml
+  pull_request:
+    paths:
+      - models/MANIFEST.json
+      - .github/workflows/release-assets.yml
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-assets:
+    name: release matches the manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # This job asks GitHub what is attached to a release; it never imports the
+      # engine. pytest alone is enough, and installing no more keeps a network
+      # check from going red over an unrelated wheel.
+      - name: Install
+        run: pip install pytest
+
+      - name: Compare release assets against models/MANIFEST.json
+        env:
+          YORUBA_CHECK_RELEASE: "1"
+          # gh is preinstalled on the runner; the default token can read this
+          # repository's own releases, which is all this needs.
+          GH_TOKEN: ${{ github.token }}
+        run: python -m pytest tests/test_install.py -k Release -v
