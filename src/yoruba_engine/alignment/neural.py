@@ -199,7 +199,7 @@ def _recorded_encoder(recorded: str | Path) -> Path:
     when the head was trained.
     """
     candidate = Path(recorded)
-    if candidate.exists():
+    if _is_checkpoint(candidate):
         return candidate
     # A checkpoint written on the other kind of machine records the other kind
     # of separator, and Path on this one reads the whole string as a single
@@ -213,16 +213,33 @@ def _recorded_encoder(recorded: str | Path) -> Path:
             "with:\n  python scripts/train_frame_aligner.py")
     if "models" in parts:
         relocated = PROJECT_ROOT.joinpath(*parts[parts.index("models"):])
-        if relocated.exists():
+        if _is_checkpoint(relocated):
             return relocated
     relocated = PROJECT_ROOT / "models" / parts[-1]
-    if relocated.exists():
+    if _is_checkpoint(relocated):
         return relocated
+    # A directory that is present but has no config.json is the more confusing
+    # failure of the two, because transformers stops treating the argument as a
+    # path at all: it reads it as a Hub repository id and answers with a
+    # huggingface.co URL built out of the local path, which sends the reader
+    # looking for a model that was never online.
+    for present in (candidate, relocated):
+        if present.is_dir():
+            raise AlignmentError(
+                f"The encoder directory {present} has no config.json, so it is "
+                "not a loadable checkpoint.\n"
+                "Weights alone are not enough. Restore the file with:\n"
+                "  git checkout models/finetuned_utterance/config.json")
     raise AlignmentError(
         f"The frame aligner was trained against the encoder {recorded}, which "
         f"is not here.\n"
         f"Looked for it at {relocated} as well. Fetch it with:\n"
         "  python scripts/fetch_models.py")
+
+
+def _is_checkpoint(path: Path) -> bool:
+    """Whether a directory is something transformers can load from disk."""
+    return (path / "config.json").is_file()
 
 
 class NeuralAligner:
