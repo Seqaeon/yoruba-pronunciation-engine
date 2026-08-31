@@ -558,11 +558,25 @@ learner — with the classifier, confidence is a real predicted probability.
 python -m pytest
 ```
 
-208 tests.
+232 tests.
 
 The suite covers orthography and Unicode handling, G2P, tone classification and
 downdrift correction, and word alignment and scoring. It needs no audio, no MFA,
 and no trained model.
+
+`tests/test_install.py` covers a different thing: what a *clone* gets, rather
+than what the working tree happens to hold. It asks git rather than the
+filesystem, because a development machine has files that were never committed
+and paths that exist on no other computer -- which is how three broken installs
+shipped past a green suite. One test there needs the network and an
+authenticated `gh`, and is skipped unless you ask for it:
+
+```bash
+YORUBA_CHECK_RELEASE=1 python -m pytest tests/test_install.py
+```
+
+It compares the release assets against `models/MANIFEST.json`, and is the only
+check that can catch a manifest updated without the matching upload.
 
 ## Project layout
 
