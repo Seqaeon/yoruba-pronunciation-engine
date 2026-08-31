@@ -50,6 +50,23 @@ SAMPLE_RATE = 16000
 DEV_SHARE, TEST_SHARE = 0.04, 0.04
 
 
+def _portable(path: Path) -> str:
+    """The encoder path as a checkpoint should record it.
+
+    Recorded verbatim this was an absolute path, which named the encoder
+    correctly on the machine that trained the head and named nothing at all
+    anywhere else -- on Windows it reached transformers as
+    '\\home\\...\\models\\finetuned_utterance' and stopped the backend.
+    A path inside the project is recorded relative to it so that any
+    installation can find it.
+    """
+    resolved = Path(path).resolve()
+    try:
+        return resolved.relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
 def split_of(speaker: str) -> str:
     draw = int(hashlib.sha256(speaker.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
     if draw < TEST_SHARE:
@@ -249,7 +266,7 @@ def train(args) -> None:
             torch.save({"state_dict": head.state_dict(), "phones": phones,
                         "hidden": args.hidden, "width": features.shape[1],
                         "dev_frame_accuracy": accuracy,
-                        "encoder": str(args.encoder)}, args.model)
+                        "encoder": _portable(args.encoder)}, args.model)
     print(f"\nbest dev frame accuracy {best:.4f}, saved to {args.model}")
 
 

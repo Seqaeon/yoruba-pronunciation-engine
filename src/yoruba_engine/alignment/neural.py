@@ -39,10 +39,11 @@ shipped reference.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import numpy as np
 
+from ..config import PROJECT_ROOT
 from ..datatypes import Alignment, Interval
 from ..exceptions import AlignmentError
 from ..g2p.dictionary import grapheme_to_phonemes
@@ -182,6 +183,48 @@ def viterbi(log_posteriors: np.ndarray, sequence: np.ndarray,
     return starts
 
 
+def _recorded_encoder(recorded: str | Path) -> Path:
+    """Where the encoder a checkpoint names actually is on this machine.
+
+    Checkpoints trained before this was normalised recorded the absolute path
+    of the machine that trained them. That path exists on exactly one computer;
+    everywhere else transformers reported
+
+        Incorrect path_or_model_id: '\\home\\...\\models\\finetuned_utterance'
+
+    -- a POSIX path rendered by Windows, naming a directory the install had
+    fetched and had sitting in the right place all along. So a recorded path
+    that is not there is re-anchored under this installation rather than
+    treated as fatal: what matters is which encoder, not which disk it was on
+    when the head was trained.
+    """
+    candidate = Path(recorded)
+    if candidate.exists():
+        return candidate
+    # A checkpoint written on the other kind of machine records the other kind
+    # of separator, and Path on this one reads the whole string as a single
+    # filename rather than as a path. Split on both so either can be
+    # re-anchored, which is also what makes the Windows rendering of a POSIX
+    # path in the error above resolvable.
+    parts = PurePosixPath(str(recorded).replace("\\", "/")).parts
+    if not parts:
+        raise AlignmentError(
+            f"The frame aligner records no encoder ({recorded!r}). Retrain it "
+            "with:\n  python scripts/train_frame_aligner.py")
+    if "models" in parts:
+        relocated = PROJECT_ROOT.joinpath(*parts[parts.index("models"):])
+        if relocated.exists():
+            return relocated
+    relocated = PROJECT_ROOT / "models" / parts[-1]
+    if relocated.exists():
+        return relocated
+    raise AlignmentError(
+        f"The frame aligner was trained against the encoder {recorded}, which "
+        f"is not here.\n"
+        f"Looked for it at {relocated} as well. Fetch it with:\n"
+        "  python scripts/fetch_models.py")
+
+
 class NeuralAligner:
     """Aligns one recording against one transcript, in about 0.2 s.
 
@@ -230,7 +273,7 @@ class NeuralAligner:
 
         checkpoint = torch.load(self.model_path, map_location="cpu", weights_only=False)
         self._phones = list(checkpoint["phones"])
-        encoder_path = self._encoder_override or Path(checkpoint["encoder"])
+        encoder_path = self._encoder_override or _recorded_encoder(checkpoint["encoder"])
         device = self._device or ("cuda" if torch.cuda.is_available() else "cpu")
         dtype = torch.float16 if device == "cuda" else torch.float32
 
