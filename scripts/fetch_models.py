@@ -56,6 +56,50 @@ def verify(path: Path, expected: dict) -> str:
     return "ok"
 
 
+#: Diagnosed once, on the first artifact that needs fetching, and remembered.
+_GH_STATE: str | None = None
+
+
+def gh_state() -> str:
+    """Return 'ready', 'absent' or 'unauthenticated', explaining the first time.
+
+    Worth the noise because the failure is otherwise unreadable. Without a
+    usable ``gh`` every artifact falls through to the anonymous HTTP path and
+    GitHub answers 404 for all of them, so a single missing credential presents
+    as five broken URLs -- and the URLs are the one thing that is fine.
+    """
+    global _GH_STATE
+    if _GH_STATE is not None:
+        return _GH_STATE
+    if shutil.which("gh") is None:
+        _GH_STATE = "absent"
+        print("\n! The GitHub CLI (gh) is not on PATH, so the download below can only\n"
+              "  be attempted anonymously. Release assets on a private repository are\n"
+              "  invisible to an anonymous request -- GitHub answers 404 rather than\n"
+              "  401 -- so every artifact will fail with a 404 that is about your\n"
+              "  credentials and not about the address it was fetched from.\n"
+              "\n"
+              "    Windows:  winget install GitHub.cli\n"
+              "    macOS:    brew install gh\n"
+              "    Linux:    see https://github.com/cli/cli#installation\n"
+              "\n"
+              "  Then:  gh auth login\n")
+        return _GH_STATE
+    probe = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+    if probe.returncode != 0:
+        _GH_STATE = "unauthenticated"
+        print("\n! The GitHub CLI is installed but not signed in. A private repository's\n"
+              "  release assets answer 404 to an unauthenticated request, so the\n"
+              "  downloads below will fail as though the files did not exist.\n"
+              "\n"
+              "  Sign in with:  gh auth login\n"
+              "  You also need read access to the engine repository itself; the same\n"
+              "  grant that lets you clone it is what releases the artifacts.\n")
+        return _GH_STATE
+    _GH_STATE = "ready"
+    return _GH_STATE
+
+
 def download_with_gh(repo: str, tag: str, destination: Path,
                      asset: str | None = None) -> bool:
     """Fetch a release asset through the GitHub CLI.
@@ -67,7 +111,7 @@ def download_with_gh(repo: str, tag: str, destination: Path,
 
     Returns whether the asset was written.
     """
-    if shutil.which("gh") is None:
+    if gh_state() != "ready":
         return False
     destination.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
@@ -155,6 +199,16 @@ def main() -> int:
                 statuses[relative] = state
                 continue
             state = verify(path, expected)
+            # A download that lands and then fails verification is not a
+            # corrupted transfer; it is the release carrying a different build
+            # from the one the manifest was written against. Say so, because
+            # re-running the fetch will reproduce it forever.
+            if state in ("wrong-size", "wrong-hash"):
+                print(f"    ! {asset} on {asset_tag} is not the file the manifest "
+                      f"describes.\n"
+                      f"      The asset on the release is stale. Replace it with:\n"
+                      f"        gh release upload {asset_tag} <path-to-{asset}> "
+                      f"--repo {args.repo} --clobber")
         statuses[relative] = state
         print(f"{relative:<40}{state:<13}{expected['bytes'] / 1e6:.1f} MB")
 
