@@ -555,10 +555,10 @@ learner — with the classifier, confidence is a real predicted probability.
 ## Tests
 
 ```bash
-/home/seqaeon/Downloads/venv/bin/python -m pytest
+python -m pytest
 ```
 
-94 tests.
+208 tests.
 
 The suite covers orthography and Unicode handling, G2P, tone classification and
 downdrift correction, and word alignment and scoring. It needs no audio, no MFA,

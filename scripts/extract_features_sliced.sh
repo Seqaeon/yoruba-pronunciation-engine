@@ -16,7 +16,10 @@
 #   bash scripts/extract_features_sliced.sh
 set -u
 
-PY=/home/seqaeon/Downloads/venv/bin/python
+source "$(dirname "${BASH_SOURCE[0]}")/_repo.sh"
+# Slice caches are written to paths relative to the repository, so run from
+# there rather than from wherever this was invoked.
+cd "$ROOT"
 OUT=models/w2v_slices_v3
 TOTAL=59951
 SLICE=${SLICE:-4000}

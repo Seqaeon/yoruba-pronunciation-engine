@@ -18,6 +18,7 @@ poor.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import unicodedata
 from pathlib import Path
@@ -49,6 +50,29 @@ def key(text: str) -> list[str]:
     return flat.lower().split()
 
 
+def _default_reference_dir() -> Path:
+    """Where the app keeps its reference clips, if the app is findable.
+
+    There is no fixed path from here to the app: setup-engine clones this
+    engine into $HOME, while the app repository is wherever its owner put it.
+    So this searches the way start-backend.sh searches for the engine in the
+    other direction -- an explicit override first, then the conventional
+    places -- and falls back to a directory inside this repository rather than
+    guessing at an absolute path on someone else's disk.
+
+    This default used to be one absolute path from the machine the script was
+    written on. Anywhere else it wrote a full set of clips into a directory the
+    app did not read.
+    """
+    named = os.environ.get("LEARN_YOR_ROOT")
+    if named:
+        return Path(named) / "app" / "public" / "reference"
+    for candidate in (ROOT.parent / "Learn-Yor", Path.home() / "Learn-Yor"):
+        if (candidate / "app" / "public").is_dir():
+            return candidate / "app" / "public" / "reference"
+    return ROOT / "output" / "reference"
+
+
 def main() -> int:
     import soundfile as sf
 
@@ -59,8 +83,10 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", type=Path, default=ROOT / "data" / "train_corpus")
-    parser.add_argument("--out", type=Path,
-                        default=Path("/home/seqaeon/Downloads/Learn-Yor/app/public/reference"))
+    parser.add_argument("--out", type=Path, default=_default_reference_dir(),
+                        help="Where to write the clips. Defaults to the app's "
+                             "reference directory if the app repository can be "
+                             "found; see LEARN_YOR_ROOT.")
     parser.add_argument("--candidates", type=int, default=4,
                         help="How many matches to score per phrase before choosing")
     parser.add_argument("--skip", type=int, nargs="*", default=[4],

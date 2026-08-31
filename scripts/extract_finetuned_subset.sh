@@ -16,7 +16,10 @@
 #   SLICES="0 4000 8000 12000" bash scripts/extract_finetuned_subset.sh
 set -u
 
-PY=/home/seqaeon/Downloads/venv/bin/python
+source "$(dirname "${BASH_SOURCE[0]}")/_repo.sh"
+# Slice caches are written to paths relative to the repository, so run from
+# there rather than from wherever this was invoked.
+cd "$ROOT"
 OUT=${OUT:-models/w2v_slices_v3_ft}
 MODEL=${MODEL:-models/finetuned_encoder}
 SLICES=${SLICES:-"0 4000 8000"}

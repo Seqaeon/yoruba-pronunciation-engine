@@ -6,8 +6,8 @@
 # encoder swap touches. Re-running them would only add noise to numbers that are
 # already correct.
 set -u
-PY=/home/seqaeon/Downloads/venv/bin/python
-cd /home/seqaeon/Downloads/Yoruba_Learner
+source "$(dirname "${BASH_SOURCE[0]}")/_repo.sh"
+cd "$ROOT"
 
 echo "##### reliability: duration floor and entropy ceiling #####"
 timeout 3600 $PY scripts/calibrate_reliability.py --aligned output/slr86_new --limit 400 2>&1 | tail -26
