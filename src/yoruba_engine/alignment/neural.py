@@ -183,6 +183,23 @@ def viterbi(log_posteriors: np.ndarray, sequence: np.ndarray,
     return starts
 
 
+def _anchored(path: Path | str) -> Path:
+    """A model path that does not depend on the working directory.
+
+    ``available`` is a plain existence check against a relative default, and
+    the pipeline reads it to decide which aligner to use. So a process started
+    from anywhere but the repository root answered "no frame aligner" and fell
+    back to MFA: 13.8 s per utterance instead of 0.56 s, announced in a single
+    log line. Being merely slower rather than broken is what makes this worth
+    anchoring -- nothing fails, so nothing gets investigated.
+    """
+    candidate = Path(path)
+    if candidate.is_absolute() or candidate.exists():
+        return candidate
+    anchored = PROJECT_ROOT / candidate
+    return anchored if anchored.exists() else candidate
+
+
 def _recorded_encoder(recorded: str | Path) -> Path:
     """Where the encoder a checkpoint names actually is on this machine.
 
@@ -256,7 +273,7 @@ class NeuralAligner:
         device: str | None = None,
         min_frames: int = 3,
     ) -> None:
-        self.model_path = Path(model_path)
+        self.model_path = _anchored(model_path)
         #: Floor on phone duration, in 20 ms frames. Chosen by measuring tone
         #: accuracy on 200 held-out utterances rather than by matching MFA's
         #: 30 ms HMM floor, which is what suggested two: 1 gives 70.4%, 2 gives

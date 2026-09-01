@@ -81,8 +81,10 @@ def _default_aligner(config):
         logger.info("Aligning with %s (MFA is used for training, not requests)",
                     neural.model_path)
         return neural
-    logger.info("No frame aligner at %s; falling back to MFA, which costs about "
-                "13.8 s per utterance", neural.model_path)
+    # Warning, not info: this is a 25x slowdown that raises nothing, returns
+    # ordinary-looking scores, and is invisible unless somebody reads the log.
+    logger.warning("No frame aligner at %s; falling back to MFA, which costs "
+                   "about 13.8 s per utterance instead of 0.56 s", neural.model_path)
     return MFAAligner(config)
 
 

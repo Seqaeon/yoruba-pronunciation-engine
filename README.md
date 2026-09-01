@@ -558,7 +558,7 @@ learner — with the classifier, confidence is a real predicted probability.
 python -m pytest
 ```
 
-232 tests.
+242 tests.
 
 The suite covers orthography and Unicode handling, G2P, tone classification and
 downdrift correction, and word alignment and scoring. It needs no audio, no MFA,
